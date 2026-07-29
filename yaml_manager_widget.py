@@ -7,13 +7,14 @@ from typing import List, Dict, Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QLineEdit, QLabel, QFrame, QHeaderView
+    QLineEdit, QLabel, QFrame, QHeaderView, QSplitter, QStackedWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 
 from cache_manager import CacheManager
 from vault_scanner import VaultScanner
+from note_editor import NoteEditorPanel
 
 
 class YamlManagerWidget(QWidget):
@@ -38,7 +39,25 @@ class YamlManagerWidget(QWidget):
         main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(6)
 
-        # Excel Filter Header Frame: Search Line Edit Only
+        # Splitter to divide page into 2 panels
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #333333;
+                width: 3px;
+            }
+            QSplitter::handle:hover {
+                background-color: #0e639c;
+            }
+        """)
+
+        # LEFT PANEL: Excel Filter & Note List Table
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(6)
+
+        # Excel Filter Header Frame
         header_frame = QFrame()
         header_frame.setStyleSheet("""
             QFrame {
@@ -73,16 +92,15 @@ class YamlManagerWidget(QWidget):
         self.search_input.textChanged.connect(self.load_data)
         filter_row.addWidget(self.search_input, stretch=1)
 
-        main_layout.addWidget(header_frame)
+        left_layout.addWidget(header_frame)
 
         # Table Widget (# and Note Title columns only)
         self.table_widget = QTableWidget()
         self.table_widget.setColumnCount(2)
         self.table_widget.setHorizontalHeaderLabels(["#", "Note Title"])
-        self.table_widget.setColumnWidth(0, 50)
+        self.table_widget.setColumnWidth(0, 45)
         self.table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
 
-        # Spreadsheet styling: Crisp grid lines, alternating rows, compact row height
         self.table_widget.setShowGrid(True)
         self.table_widget.setAlternatingRowColors(True)
         self.table_widget.verticalHeader().setDefaultSectionSize(28)
@@ -113,7 +131,37 @@ class YamlManagerWidget(QWidget):
                 color: #ffffff;
             }
         """)
-        main_layout.addWidget(self.table_widget, stretch=1)
+        self.table_widget.itemSelectionChanged.connect(self._on_table_selection_changed)
+        left_layout.addWidget(self.table_widget, stretch=1)
+
+        splitter.addWidget(left_widget)
+
+        # RIGHT PANEL: Note Content Preview & Editor / Multi-selection Placeholder
+        self.right_stack = QStackedWidget()
+        self.right_stack.setStyleSheet("QStackedWidget { background-color: #1e1e1e; border: 1px solid #333333; border-radius: 4px; }")
+
+        # 1. Placeholder View
+        self.placeholder_widget = QWidget()
+        ph_layout = QVBoxLayout(self.placeholder_widget)
+        ph_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.lbl_placeholder = QLabel("📄 Select a single note to preview content")
+        self.lbl_placeholder.setStyleSheet("color: #888888; font-size: 14px; font-weight: bold;")
+        self.lbl_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ph_layout.addWidget(self.lbl_placeholder)
+
+        self.right_stack.addWidget(self.placeholder_widget)
+
+        # 2. Live Note Editor View
+        self.editor_panel = NoteEditorPanel(parent=self)
+        self.editor_panel.save_requested.connect(self._on_note_saved)
+        self.right_stack.addWidget(self.editor_panel)
+
+        splitter.addWidget(self.right_stack)
+
+        # 50/50 initial split ratio
+        splitter.setSizes([450, 550])
+        main_layout.addWidget(splitter, stretch=1)
 
     def load_data(self):
         self.ignore_cell_signals = True
@@ -144,3 +192,65 @@ class YamlManagerWidget(QWidget):
             self.table_widget.setItem(row_idx, 1, item_title)
 
         self.ignore_cell_signals = False
+        self._on_table_selection_changed()
+
+    def _get_selected_rows(self) -> List[int]:
+        selected_rows = set()
+        if self.table_widget.selectionModel():
+            for idx in self.table_widget.selectionModel().selectedRows():
+                selected_rows.add(idx.row())
+        for item in self.table_widget.selectedItems():
+            selected_rows.add(item.row())
+        return sorted(list(selected_rows))
+
+    def _on_table_selection_changed(self):
+        if self.ignore_cell_signals:
+            return
+
+        selected_rows = self._get_selected_rows()
+
+        if len(selected_rows) == 1:
+            row_idx = selected_rows[0]
+            if 0 <= row_idx < len(self.notes_data):
+                note_info = self.notes_data[row_idx]
+                rel_path = note_info["path"]
+                abs_path = Path(self.vault_path) / rel_path
+
+                if abs_path.exists():
+                    try:
+                        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                            content = f.read()
+
+                        # Fetch available tags for autocomplete
+                        stats = self.cache_manager.get_tag_stats()
+                        all_tags = [t.name for t in stats.all_tags] if hasattr(stats, 'all_tags') else []
+
+                        self.editor_panel.load_note(rel_path, content, all_tags)
+                        self.right_stack.setCurrentWidget(self.editor_panel)
+                        return
+                    except Exception as e:
+                        print(f"Error reading note preview: {e}")
+
+        elif len(selected_rows) > 1:
+            self.lbl_placeholder.setText(f"📄 Multiple notes selected ({len(selected_rows)} notes)\n\nPlease select one note to preview.")
+            self.right_stack.setCurrentWidget(self.placeholder_widget)
+        else:
+            self.lbl_placeholder.setText("📄 Select a single note to preview content")
+            self.right_stack.setCurrentWidget(self.placeholder_widget)
+
+    def _on_note_saved(self, rel_path: str, new_content: str):
+        if not self.vault_path:
+            return
+
+        abs_path = Path(self.vault_path) / rel_path
+        try:
+            with open(abs_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+
+            updated_note = VaultScanner.scan_file(abs_path, Path(self.vault_path))
+            if updated_note:
+                self.cache_manager.incremental_update_file(updated_note)
+
+            self.yaml_updated.emit()
+        except Exception as e:
+            print(f"Error saving note in YamlManagerWidget: {e}")
