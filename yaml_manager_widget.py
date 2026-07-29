@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QLineEdit, QLabel, QFrame, QHeaderView, QSplitter, QStackedWidget
+    QLineEdit, QLabel, QFrame, QHeaderView, QSplitter, QStackedWidget, QMenu
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -132,6 +132,11 @@ class YamlManagerWidget(QWidget):
             }
         """)
         self.table_widget.itemSelectionChanged.connect(self._on_table_selection_changed)
+
+        # Enable Context Menu on Note List Table
+        self.table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table_widget.customContextMenuRequested.connect(self._show_context_menu)
+
         left_layout.addWidget(self.table_widget, stretch=1)
 
         splitter.addWidget(left_widget)
@@ -202,6 +207,110 @@ class YamlManagerWidget(QWidget):
         for item in self.table_widget.selectedItems():
             selected_rows.add(item.row())
         return sorted(list(selected_rows))
+
+    def _show_context_menu(self, pos):
+        item = self.table_widget.itemAt(pos)
+        if not item:
+            return
+
+        clicked_row = item.row()
+        selected_rows = self._get_selected_rows()
+
+        if clicked_row not in selected_rows:
+            self.table_widget.clearSelection()
+            self.table_widget.selectRow(clicked_row)
+            selected_rows = [clicked_row]
+
+        if not selected_rows:
+            return
+
+        count_str = f"{len(selected_rows)} note(s)"
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #252526;
+                color: #cccccc;
+                border: 1px solid #3c3c3c;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 5px 20px 5px 12px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #04395e;
+                color: #ffffff;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #333333;
+                margin: 4px 0px;
+            }
+        """)
+
+        # Header Title
+        lbl_header = menu.addAction(f"⚡ Batch Update ({count_str})")
+        lbl_header.setEnabled(False)
+        menu.addSeparator()
+
+        # 1. Bucket Submenu
+        bucket_menu = menu.addMenu("📁 Set Bucket")
+        buckets = ["note", "idea", "wip", "task", "dailynote"]
+        for b in buckets:
+            act = bucket_menu.addAction(b)
+            act.triggered.connect(lambda _, val=b, rows=selected_rows: self._batch_apply_yaml_key("bucket", val, rows))
+
+        # 2. Status Submenu
+        status_menu = menu.addMenu("🔥 Set Status (Heat)")
+        statuses = [("🔥 hot", "hot"), ("☀️ warm", "warm"), ("❄️ cool", "cool"), ("🧊 cold", "cold")]
+        for label, val in statuses:
+            act = status_menu.addAction(label)
+            act.triggered.connect(lambda _, val=val, rows=selected_rows: self._batch_apply_yaml_key("status", val, rows))
+
+        # 3. Attention Submenu
+        att_menu = menu.addMenu("⚡ Set Attention")
+        attentions = [("✅ settled", "settled"), ("⚡ needs-revisit", "needs-revisit"), ("📌 pinned", "pinned")]
+        for label, val in attentions:
+            act = att_menu.addAction(label)
+            act.triggered.connect(lambda _, val=val, rows=selected_rows: self._batch_apply_yaml_key("attention", val, rows))
+
+        menu.exec(self.table_widget.viewport().mapToGlobal(pos))
+
+    def _batch_apply_yaml_key(self, key: str, value: str, rows: List[int]):
+        for r in rows:
+            if 0 <= r < len(self.notes_data):
+                n = self.notes_data[r]
+                rel_p = n["path"]
+                abs_p = Path(self.vault_path) / rel_p
+
+                if not abs_p.exists():
+                    continue
+
+                try:
+                    with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
+                        raw_content = f.read()
+
+                    post = frontmatter.loads(raw_content)
+                    meta = dict(post.metadata)
+                    meta[key] = value
+                    post.metadata = meta
+                    new_text = frontmatter.dumps(post)
+
+                    with open(abs_p, "w", encoding="utf-8") as f:
+                        f.write(new_text)
+
+                    updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
+                    if updated_note:
+                        self.cache_manager.incremental_update_file(updated_note)
+                except Exception as e:
+                    print(f"Error saving batch YAML for {rel_p}: {e}")
+
+        # Emit signal to refresh Tab 1 & Tab 2
+        self.yaml_updated.emit()
+
+        # Reload data & update live preview if 1 note selected
+        self.load_data()
 
     def _on_table_selection_changed(self):
         if self.ignore_cell_signals:
