@@ -486,20 +486,34 @@ class YamlManagerWidget(QWidget):
         dialog.resolved.connect(lambda: self.load_data())
         dialog.exec()
 
-    def _get_selected_row_indices(self) -> List[int]:
-        selected = []
+    def _get_selected_row_indices(self, trigger_row: Optional[int] = None) -> List[int]:
+        selected_set = set()
+        
+        # 1. Standard table row selection (Shift+Click, Ctrl+Click, drag selection)
+        if self.table_widget.selectionModel():
+            for model_index in self.table_widget.selectionModel().selectedRows():
+                selected_set.add(model_index.row())
+            for item in self.table_widget.selectedItems():
+                selected_set.add(item.row())
+
+        # 2. Checkboxes in Col 0
         for r in range(self.table_widget.rowCount()):
             w = self.table_widget.cellWidget(r, 0)
             if w:
                 chk = w.findChild(QCheckBox)
                 if chk and chk.isChecked():
-                    selected.append(r)
-        return selected
+                    selected_set.add(r)
+
+        # 3. Always include trigger row if specified
+        if trigger_row is not None:
+            selected_set.add(trigger_row)
+
+        return sorted(list(selected_set))
 
     def _apply_batch_updates(self):
         rows = self._get_selected_row_indices()
         if not rows:
-            QMessageBox.information(self, "No Selection", "Please check at least one note checkbox to batch update.")
+            QMessageBox.information(self, "No Selection", "Please check or select at least one note to batch update.")
             return
 
         b_val = self.combo_batch_bucket.currentText()
@@ -614,30 +628,38 @@ class YamlManagerWidget(QWidget):
     def _on_row_yaml_changed(self, row_idx: int, key: str, value):
         if self.ignore_cell_signals:
             return
-        n = self.notes_data[row_idx]
-        rel_p = n["path"]
-        abs_p = Path(self.vault_path) / rel_p
 
-        if not abs_p.exists():
-            return
+        target_rows = self._get_selected_row_indices(trigger_row=row_idx)
 
-        try:
-            with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
-                raw_content = f.read()
+        for r in target_rows:
+            if r < 0 or r >= len(self.notes_data):
+                continue
+            n = self.notes_data[r]
+            rel_p = n["path"]
+            abs_p = Path(self.vault_path) / rel_p
 
-            post = frontmatter.loads(raw_content)
-            meta = dict(post.metadata)
-            meta[key] = value
-            post.metadata = meta
-            new_text = frontmatter.dumps(post)
+            if not abs_p.exists():
+                continue
 
-            with open(abs_p, "w", encoding="utf-8") as f:
-                f.write(new_text)
+            try:
+                with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
+                    raw_content = f.read()
 
-            updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
-            if updated_note:
-                self.cache_manager.incremental_update_file(updated_note)
+                post = frontmatter.loads(raw_content)
+                meta = dict(post.metadata)
+                meta[key] = value
+                post.metadata = meta
+                new_text = frontmatter.dumps(post)
 
-            self.yaml_updated.emit()
-        except Exception as e:
-            print(f"Error saving row change for {rel_p}: {e}")
+                with open(abs_p, "w", encoding="utf-8") as f:
+                    f.write(new_text)
+
+                updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
+                if updated_note:
+                    self.cache_manager.incremental_update_file(updated_note)
+            except Exception as e:
+                print(f"Error saving row change for {rel_p}: {e}")
+
+        # Refresh UI after multi-row update
+        self.load_data()
+        self.yaml_updated.emit()
