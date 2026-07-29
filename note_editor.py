@@ -5,7 +5,7 @@ from typing import List, Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QPlainTextEdit, QFrame, QCompleter, QMenu, QDialog, QListWidget, QMessageBox,
-    QStackedWidget, QTextBrowser, QCheckBox
+    QStackedWidget, QTextBrowser, QCheckBox, QComboBox
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QRect, QSize, QStringListModel, QTimer
 from PyQt6.QtGui import QFont, QColor, QPainter, QTextFormat, QKeySequence, QFontMetrics, QShortcut, QTextCursor
@@ -256,11 +256,35 @@ class NoteEditorPanel(QWidget):
         self.current_rel_path = ""
         self.ignore_text_changes = False
         self.countdown_seconds = 5
+        self.current_font_size = font_size
         self.setMinimumHeight(300)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 8, 10, 8)
         main_layout.setSpacing(6)
+
+        # Common Button stylesheet with sleek disabled styling
+        button_style = """
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #cccccc;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #383838; }
+            QPushButton:checked {
+                background-color: #0e639c;
+                color: #ffffff;
+                font-weight: bold;
+            }
+            QPushButton:disabled {
+                background-color: #252526;
+                color: #555555;
+                border: 1px solid #333333;
+            }
+        """
 
         # Toolbar Row
         toolbar = QHBoxLayout()
@@ -274,51 +298,47 @@ class NoteEditorPanel(QWidget):
         self.btn_mode_source = QPushButton("📝 Source")
         self.btn_mode_source.setCheckable(True)
         self.btn_mode_source.setChecked(True)
-        self.btn_mode_source.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #cccccc;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-                padding: 4px 10px;
-                font-size: 11px;
-            }
-            QPushButton:checked {
-                background-color: #0e639c;
-                color: #ffffff;
-                font-weight: bold;
-            }
-        """)
+        self.btn_mode_source.setStyleSheet(button_style)
 
         self.btn_mode_preview = QPushButton("👁️ Preview")
         self.btn_mode_preview.setCheckable(True)
         self.btn_mode_preview.setChecked(False)
-        self.btn_mode_preview.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #cccccc;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-                padding: 4px 10px;
-                font-size: 11px;
-            }
-            QPushButton:checked {
-                background-color: #0e639c;
-                color: #ffffff;
-                font-weight: bold;
-            }
-        """)
+        self.btn_mode_preview.setStyleSheet(button_style)
 
         self.btn_mode_source.clicked.connect(lambda: self._set_view_mode("source"))
         self.btn_mode_preview.clicked.connect(lambda: self._set_view_mode("preview"))
 
-        # Auto-Save Controls
+        # Font / Text Scaling Dropdown
+        self.combo_font_size = QComboBox()
+        self.combo_font_size.addItems(["10pt", "11pt", "12pt", "13pt", "14pt", "16pt", "18pt", "20pt"])
+        self.combo_font_size.setCurrentText(f"{font_size}pt")
+        self.combo_font_size.setToolTip("Scale text / font size for preview and editor")
+        self.combo_font_size.setStyleSheet("""
+            QComboBox {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                padding: 3px 6px;
+                font-size: 11px;
+            }
+            QComboBox:disabled {
+                background-color: #252526;
+                color: #555555;
+                border: 1px solid #333333;
+            }
+        """)
+        self.combo_font_size.currentTextChanged.connect(self._on_font_size_changed)
+
+        # Top Right Fixed Status Area: Auto-Save Controls
         self.chk_autosave = QCheckBox("Auto-Save")
         self.chk_autosave.setChecked(True)
         self.chk_autosave.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold;")
 
-        self.lbl_autosave_status = QLabel("")
-        self.lbl_autosave_status.setStyleSheet("color: #e67e22; font-size: 11px; font-weight: bold;")
+        self.lbl_autosave_status = QLabel("No active note")
+        self.lbl_autosave_status.setStyleSheet("color: #777777; font-size: 11px;")
+        self.lbl_autosave_status.setMinimumWidth(120)
+        self.lbl_autosave_status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self.btn_cancel_autosave = QPushButton("✖ Cancel")
         self.btn_cancel_autosave.setStyleSheet("""
@@ -343,18 +363,7 @@ class NoteEditorPanel(QWidget):
 
         # "Read From..." Dropdown Button
         self.btn_read_from = QPushButton("📖 Read From... ▼")
-        self.btn_read_from.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #d4d4d4;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-                padding: 4px 10px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:hover { background-color: #383838; }
-        """)
+        self.btn_read_from.setStyleSheet(button_style)
 
         read_menu = QMenu(self)
         read_menu.setStyleSheet("""
@@ -397,6 +406,11 @@ class NoteEditorPanel(QWidget):
                 font-size: 11px;
             }
             QPushButton:hover { background-color: #1177bb; }
+            QPushButton:disabled {
+                background-color: #252526;
+                color: #555555;
+                border: 1px solid #333333;
+            }
         """)
         self.btn_save.clicked.connect(self._on_save)
 
@@ -411,6 +425,11 @@ class NoteEditorPanel(QWidget):
                 font-size: 11px;
             }
             QPushButton:hover { background-color: #505050; }
+            QPushButton:disabled {
+                background-color: #252526;
+                color: #555555;
+                border: 1px solid #333333;
+            }
         """)
         self.btn_cancel.clicked.connect(self._on_cancel)
 
@@ -418,6 +437,7 @@ class NoteEditorPanel(QWidget):
         toolbar.addWidget(self.lbl_title, stretch=1)
         toolbar.addWidget(self.btn_mode_source)
         toolbar.addWidget(self.btn_mode_preview)
+        toolbar.addWidget(self.combo_font_size)
         toolbar.addSpacing(10)
         toolbar.addWidget(self.chk_autosave)
         toolbar.addWidget(self.lbl_autosave_status)
@@ -438,17 +458,7 @@ class NoteEditorPanel(QWidget):
 
         self.preview_browser = QTextBrowser(self)
         self.preview_browser.setOpenExternalLinks(True)
-        self.preview_browser.setStyleSheet("""
-            QTextBrowser {
-                background-color: #1e1e1e;
-                color: #d4d4d4;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-                padding: 12px;
-                font-size: 13px;
-                line-height: 1.5;
-            }
-        """)
+        self._apply_preview_font_size(font_size)
         self.editor_stack.addWidget(self.preview_browser)
 
         main_layout.addWidget(self.editor_stack, stretch=1)
@@ -460,11 +470,12 @@ class NoteEditorPanel(QWidget):
         cancel_shortcut = QShortcut(QKeySequence("Escape"), self)
         cancel_shortcut.activated.connect(self._on_cancel)
 
-        # Initial disabled state (when no note is loaded)
+        # Initial disabled state (when no single note is loaded)
         self._set_controls_enabled(False)
 
     def _set_controls_enabled(self, enabled: bool):
         self.chk_autosave.setEnabled(enabled)
+        self.combo_font_size.setEnabled(enabled)
         self.btn_mode_source.setEnabled(enabled)
         self.btn_mode_preview.setEnabled(enabled)
         self.btn_read_from.setEnabled(enabled)
@@ -472,13 +483,48 @@ class NoteEditorPanel(QWidget):
         self.btn_cancel.setEnabled(enabled)
 
         if not enabled:
-            self.lbl_autosave_status.setText("No active note")
-            self.lbl_autosave_status.setStyleSheet("color: #777777; font-size: 11px;")
             self.btn_cancel_autosave.hide()
             self.autosave_timer.stop()
-        else:
-            self.lbl_autosave_status.setText("")
-            self.lbl_autosave_status.setStyleSheet("color: #e67e22; font-size: 11px; font-weight: bold;")
+
+    def clear_and_disable(self, message: str):
+        self.current_rel_path = ""
+        self.lbl_title.setText(f"📄 Note Editor: {message}")
+        self.ignore_text_changes = True
+        self.editor.setPlainText("")
+        self.preview_browser.setMarkdown("")
+        self.ignore_text_changes = False
+        self._set_controls_enabled(False)
+        self.lbl_autosave_status.setText("Inactive")
+        self.lbl_autosave_status.setStyleSheet("color: #777777; font-size: 11px;")
+
+    def _on_font_size_changed(self, text: str):
+        try:
+            pt_size = int(text.replace("pt", "").strip())
+            self.current_font_size = pt_size
+
+            # Scale Source Editor font
+            font_ed = self.editor.font()
+            font_ed.setPointSize(pt_size)
+            self.editor.setFont(font_ed)
+            self.editor.update_line_number_area_width(0)
+
+            # Scale Preview Browser font
+            self._apply_preview_font_size(pt_size)
+        except Exception:
+            pass
+
+    def _apply_preview_font_size(self, pt_size: int):
+        self.preview_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                padding: 12px;
+                font-size: {pt_size}pt;
+                line-height: 1.5;
+            }}
+        """)
 
     def _set_view_mode(self, mode: str):
         if mode == "source":
@@ -508,7 +554,8 @@ class NoteEditorPanel(QWidget):
         # Stop any active timer
         self.autosave_timer.stop()
         self.btn_cancel_autosave.hide()
-        self.lbl_autosave_status.setText("")
+        self.lbl_autosave_status.setText("Ready")
+        self.lbl_autosave_status.setStyleSheet("color: #007acc; font-size: 11px; font-weight: bold;")
 
         self.ignore_text_changes = False
 
@@ -519,6 +566,7 @@ class NoteEditorPanel(QWidget):
         if self.chk_autosave.isChecked():
             self.countdown_seconds = 5
             self.lbl_autosave_status.setText(f"⏳ Auto-saving in {self.countdown_seconds}s...")
+            self.lbl_autosave_status.setStyleSheet("color: #e67e22; font-size: 11px; font-weight: bold;")
             self.btn_cancel_autosave.show()
             self.autosave_timer.start()
 
@@ -526,6 +574,7 @@ class NoteEditorPanel(QWidget):
         self.countdown_seconds -= 1
         if self.countdown_seconds > 0:
             self.lbl_autosave_status.setText(f"⏳ Auto-saving in {self.countdown_seconds}s...")
+            self.lbl_autosave_status.setStyleSheet("color: #e67e22; font-size: 11px; font-weight: bold;")
         else:
             self.autosave_timer.stop()
             self.btn_cancel_autosave.hide()
@@ -687,5 +736,5 @@ class NoteEditorPanel(QWidget):
     def _on_cancel(self):
         self.autosave_timer.stop()
         self.btn_cancel_autosave.hide()
-        self._set_controls_enabled(False)
+        self.clear_and_disable("Editing cancelled")
         self.cancel_requested.emit()

@@ -142,30 +142,13 @@ class YamlManagerWidget(QWidget):
 
         splitter.addWidget(left_widget)
 
-        # RIGHT PANEL: Note Content Preview & Editor / Multi-selection Placeholder
-        self.right_stack = QStackedWidget()
-        self.right_stack.setStyleSheet("QStackedWidget { background-color: #1e1e1e; border: 1px solid #333333; border-radius: 4px; }")
-
-        # 1. Placeholder View
-        self.placeholder_widget = QWidget()
-        ph_layout = QVBoxLayout(self.placeholder_widget)
-        ph_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.lbl_placeholder = QLabel("📄 Select a single note to preview content")
-        self.lbl_placeholder.setStyleSheet("color: #888888; font-size: 14px; font-weight: bold;")
-        self.lbl_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ph_layout.addWidget(self.lbl_placeholder)
-
-        self.right_stack.addWidget(self.placeholder_widget)
-
-        # 2. Live Note Editor View
+        # RIGHT PANEL: Permanent NoteEditorPanel (Never resizes or swaps layout!)
         self.editor_panel = NoteEditorPanel(parent=self)
         self.editor_panel.save_requested.connect(self._on_note_saved)
-        self.right_stack.addWidget(self.editor_panel)
 
-        splitter.addWidget(self.right_stack)
+        splitter.addWidget(self.editor_panel)
 
-        # 50/50 initial split ratio
+        # 45/55 split ratio
         splitter.setSizes([450, 550])
         main_layout.addWidget(splitter, stretch=1)
 
@@ -392,22 +375,18 @@ class YamlManagerWidget(QWidget):
                         with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
                             content = f.read()
 
-                        # Fetch available tags for autocomplete
                         stats = self.cache_manager.get_tag_stats()
                         all_tags = [t.name for t in stats.all_tags] if hasattr(stats, 'all_tags') else []
 
                         self.editor_panel.load_note(rel_path, content, all_tags)
-                        self.right_stack.setCurrentWidget(self.editor_panel)
                         return
                     except Exception as e:
                         print(f"Error reading note preview: {e}")
 
         elif len(selected_rows) > 1:
-            self.lbl_placeholder.setText(f"📄 Multiple notes selected ({len(selected_rows)} notes)\n\nPlease select one note to preview.")
-            self.right_stack.setCurrentWidget(self.placeholder_widget)
+            self.editor_panel.clear_and_disable(f"Multiple notes selected ({len(selected_rows)} notes)")
         else:
-            self.lbl_placeholder.setText("📄 Select a single note to preview content")
-            self.right_stack.setCurrentWidget(self.placeholder_widget)
+            self.editor_panel.clear_and_disable("Select a single note to preview")
 
     def _on_note_saved(self, rel_path: str, new_content: str):
         if not self.vault_path:
