@@ -382,6 +382,11 @@ class NoteEditorPanel(QWidget):
             }
         """)
 
+        act_master = read_menu.addAction("⚡ Fix & Auto-Format All YAML (Tags, URL, Author, Date)")
+        act_master.triggered.connect(self._fix_and_auto_format_yaml_in_note)
+
+        read_menu.addSeparator()
+
         act_tags = read_menu.addAction("🏷️ Read Tags (Extract #tags to YAML)")
         act_tags.triggered.connect(self._read_tags_from_body)
 
@@ -395,8 +400,8 @@ class NoteEditorPanel(QWidget):
         act_date.triggered.connect(self._read_created_date_from_file)
 
         read_menu.addSeparator()
-        act_fix_tags = read_menu.addAction("🛠️ Fix YAML Tags (Kebab-case List Format)")
-        act_fix_tags.triggered.connect(self._fix_yaml_tags_in_note)
+        act_fix_tags = read_menu.addAction("🛠️ Fix & Reformat YAML Tags")
+        act_fix_tags.triggered.connect(self._fix_and_auto_format_yaml_in_note)
 
         self.btn_read_from.setMenu(read_menu)
 
@@ -846,7 +851,7 @@ class NoteEditorPanel(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Capture Created Date Error", f"Failed to capture created date: {e}")
 
-    def _fix_yaml_tags_in_note(self):
+    def _fix_and_auto_format_yaml_in_note(self):
         content = self.editor.toPlainText()
         if not content.strip():
             return
@@ -860,87 +865,111 @@ class NoteEditorPanel(QWidget):
             kebab = re.sub(r'-+', '-', kebab)
             return kebab.strip("-")
 
-        parsed_tags = []
         post = None
+        meta = {}
+        body_text = content
 
-        # 1. Frontmatter PyYAML parsing
         try:
             post = frontmatter.loads(content)
             meta = dict(post.metadata)
-            raw_tags = meta.get("tags") or meta.get("tag")
-
-            if isinstance(raw_tags, str):
-                items = re.split(r"[,;\s]+", raw_tags)
-                for it in items:
-                    k = clean_to_kebab(it)
-                    if k and k not in parsed_tags:
-                        parsed_tags.append(k)
-            elif isinstance(raw_tags, list):
-                for item in raw_tags:
-                    if isinstance(item, str):
-                        sub_items = re.split(r"[,;\n]+", item)
-                        for sub in sub_items:
-                            k = clean_to_kebab(sub)
-                            if k and k not in parsed_tags:
-                                parsed_tags.append(k)
+            body_text = post.content
         except Exception:
             pass
 
-        # 2. Fallback regex extractor for malformed YAML syntax
-        if not parsed_tags:
-            match = re.search(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', content, re.DOTALL | re.IGNORECASE)
-            if match:
-                tags_text = match.group(1)
-                tokens = re.findall(r'[a-zA-Z0-9_\-\u00C0-\u024F]+', tags_text)
-                for tok in tokens:
-                    k = clean_to_kebab(tok)
-                    if k and k not in parsed_tags:
-                        parsed_tags.append(k)
+        # 1. Extract Tags (YAML + Fallback Regex + Body Hashtags)
+        parsed_tags = []
+        raw_tags = meta.get("tags") or meta.get("tag")
 
-        # 3. Extract body hashtags & Tags: lines (#ArtificialIntelligence, #AITools, #LearnAI)
-        body_lines = content.splitlines()
-        for line in body_lines:
+        if isinstance(raw_tags, str):
+            for it in re.split(r"[,;\s]+", raw_tags):
+                k = clean_to_kebab(it)
+                if k and k not in parsed_tags:
+                    parsed_tags.append(k)
+        elif isinstance(raw_tags, list):
+            for item in raw_tags:
+                if isinstance(item, str):
+                    for sub in re.split(r"[,;\n]+", item):
+                        k = clean_to_kebab(sub)
+                        if k and k not in parsed_tags:
+                            parsed_tags.append(k)
+
+        match = re.search(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', content, re.DOTALL | re.IGNORECASE)
+        if match:
+            tags_text = match.group(1)
+            for tok in re.findall(r'[a-zA-Z0-9_\-\u00C0-\u024F]+', tags_text):
+                k = clean_to_kebab(tok)
+                if k and k not in parsed_tags:
+                    parsed_tags.append(k)
+
+        for line in content.splitlines():
             line_str = line.strip()
-            # Skip markdown headers (# Header)
             if re.match(r'^#{1,6}\s', line_str):
                 continue
-            found_hashtags = re.findall(r'#([A-Za-z0-9_\-\u00C0-\u024F]+)', line_str)
-            for tag_tok in found_hashtags:
+            for tag_tok in re.findall(r'#([A-Za-z0-9_\-\u00C0-\u024F]+)', line_str):
                 k = clean_to_kebab(tag_tok)
                 if k and k not in parsed_tags:
                     parsed_tags.append(k)
 
-        if not parsed_tags:
-            self.lbl_autosave_status.setText("ℹ No tags found to format")
-            self.lbl_autosave_status.setStyleSheet("color: #777777; font-size: 11px;")
-            return
+        if parsed_tags:
+            meta["tags"] = parsed_tags
+            if "tag" in meta:
+                del meta["tag"]
 
-        # 4. Rebuild clean frontmatter
+        # 2. Extract Body URL if missing
+        if "url" not in meta or not meta["url"]:
+            urls = re.findall(r'https?://[^\s><"\')]+', content)
+            if urls:
+                meta["url"] = urls[0].rstrip(".,;:!)")
+
+        # 3. Extract Body Author if missing
+        if "author" not in meta or not meta["author"]:
+            patterns = [
+                r'\*\*(?:Author|By|Written by):\*\*\s*([^\n\r]+)',
+                r'(?:^|\n)(?:Author|By|Written by):\s*([^\n\r]+)',
+            ]
+            for pat in patterns:
+                matches = re.findall(pat, content, flags=re.IGNORECASE)
+                if matches:
+                    clean_a = matches[0].strip(" *_`#")
+                    if clean_a:
+                        meta["author"] = clean_a
+                        break
+
+        # 4. Capture Created Date if missing
+        if ("created" not in meta or not meta["created"]) and self.current_rel_path:
+            vault_p = getattr(self.parent(), 'vault_path', '')
+            if not vault_p and hasattr(self.parent(), 'parent'):
+                vault_p = getattr(self.parent().parent(), 'vault_path', '')
+            if vault_p:
+                abs_p = Path(vault_p) / self.current_rel_path
+                if abs_p.exists():
+                    try:
+                        stat_info = abs_p.stat()
+                        ctime = getattr(stat_info, 'st_ctime', stat_info.st_mtime)
+                        dt = datetime.fromtimestamp(ctime)
+                        meta["created"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        pass
+
+        # 5. Rebuild & Save
         try:
             if not post or not hasattr(post, 'metadata'):
-                tag_block = "tags:\n" + "\n".join([f"  - {t}" for t in parsed_tags])
-                if "tags:" in content or "tag:" in content:
-                    new_content = re.sub(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', f"\n{tag_block}\n", content, count=1, flags=re.DOTALL | re.IGNORECASE)
-                else:
-                    new_content = f"---\n{tag_block}\n---\n\n" + content.lstrip()
-                if not new_content.startswith("---"):
-                    new_content = f"---\n{new_content.lstrip()}"
+                post = frontmatter.Post(body_text, **meta)
             else:
-                meta = dict(post.metadata)
-                meta["tags"] = parsed_tags
-                if "tag" in meta:
-                    del meta["tag"]
                 post.metadata = meta
-                new_content = frontmatter.dumps(post)
 
+            new_content = frontmatter.dumps(post)
             self.editor.setPlainText(new_content)
             self._render_markdown_preview(new_content)
             self._on_save()
 
-            self.lbl_autosave_status.setText(f"✓ Fixed {len(parsed_tags)} YAML tag(s)")
+            self.lbl_autosave_status.setText("✓ Fixed & Auto-Formatted YAML Frontmatter")
             self.lbl_autosave_status.setStyleSheet("color: #2ecc71; font-size: 11px; font-weight: bold;")
         except Exception as e:
-            QMessageBox.critical(self, "Fix YAML Tags Error", f"Failed to format YAML frontmatter tags: {e}")
+            QMessageBox.critical(self, "Fix YAML Error", f"Failed to format YAML frontmatter: {e}")
+
+    def _fix_yaml_tags_in_note(self):
+        self._fix_and_auto_format_yaml_in_note()
 
     def _on_save(self):
         if not self.current_rel_path:

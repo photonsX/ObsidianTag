@@ -466,8 +466,6 @@ class YamlManagerWidget(QWidget):
                         f.write(new_text)
 
                     updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
-                    if updated_note:
-                        self.cache_manager.incremental_update_file(updated_note)
                 except Exception as e:
                     print(f"Error capturing created date for {rel_p}: {e}")
 
@@ -497,80 +495,101 @@ class YamlManagerWidget(QWidget):
                     with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
                         raw_content = f.read()
 
-                    parsed_tags = []
                     post = None
+                    meta = {}
+                    body_text = raw_content
 
-                    # 1. Frontmatter PyYAML parsing
                     try:
                         post = frontmatter.loads(raw_content)
                         meta = dict(post.metadata)
-                        raw_tags = meta.get("tags") or meta.get("tag")
-
-                        if isinstance(raw_tags, str):
-                            items = re.split(r"[,;\s]+", raw_tags)
-                            for it in items:
-                                k = clean_to_kebab(it)
-                                if k and k not in parsed_tags:
-                                    parsed_tags.append(k)
-                        elif isinstance(raw_tags, list):
-                            for item in raw_tags:
-                                if isinstance(item, str):
-                                    sub_items = re.split(r"[,;\n]+", item)
-                                    for sub in sub_items:
-                                        k = clean_to_kebab(sub)
-                                        if k and k not in parsed_tags:
-                                            parsed_tags.append(k)
+                        body_text = post.content
                     except Exception:
                         pass
 
-                    # 2. Fallback regex for malformed YAML tags
-                    if not parsed_tags:
-                        match = re.search(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', raw_content, re.DOTALL | re.IGNORECASE)
-                        if match:
-                            tags_text = match.group(1)
-                            tokens = re.findall(r'[a-zA-Z0-9_\-\u00C0-\u024F]+', tags_text)
-                            for tok in tokens:
-                                k = clean_to_kebab(tok)
-                                if k and k not in parsed_tags:
-                                    parsed_tags.append(k)
+                    # 1. Tags
+                    parsed_tags = []
+                    raw_tags = meta.get("tags") or meta.get("tag")
 
-                    # 3. Extract body hashtags & Tags: lines (#ArtificialIntelligence, #AITools, #LearnAI)
-                    body_lines = raw_content.splitlines()
-                    for line in body_lines:
+                    if isinstance(raw_tags, str):
+                        for it in re.split(r"[,;\s]+", raw_tags):
+                            k = clean_to_kebab(it)
+                            if k and k not in parsed_tags:
+                                parsed_tags.append(k)
+                    elif isinstance(raw_tags, list):
+                        for item in raw_tags:
+                            if isinstance(item, str):
+                                for sub in re.split(r"[,;\n]+", item):
+                                    k = clean_to_kebab(sub)
+                                    if k and k not in parsed_tags:
+                                        parsed_tags.append(k)
+
+                    match = re.search(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', raw_content, re.DOTALL | re.IGNORECASE)
+                    if match:
+                        tags_text = match.group(1)
+                        for tok in re.findall(r'[a-zA-Z0-9_\-\u00C0-\u024F]+', tags_text):
+                            k = clean_to_kebab(tok)
+                            if k and k not in parsed_tags:
+                                parsed_tags.append(k)
+
+                    for line in raw_content.splitlines():
                         line_str = line.strip()
                         if re.match(r'^#{1,6}\s', line_str):
                             continue
-                        found_hashtags = re.findall(r'#([A-Za-z0-9_\-\u00C0-\u024F]+)', line_str)
-                        for tag_tok in found_hashtags:
+                        for tag_tok in re.findall(r'#([A-Za-z0-9_\-\u00C0-\u024F]+)', line_str):
                             k = clean_to_kebab(tag_tok)
                             if k and k not in parsed_tags:
                                 parsed_tags.append(k)
 
                     if parsed_tags:
-                        if not post or not hasattr(post, 'metadata'):
-                            tag_block = "tags:\n" + "\n".join([f"  - {t}" for t in parsed_tags])
-                            if "tags:" in raw_content or "tag:" in raw_content:
-                                new_text = re.sub(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', f"\n{tag_block}\n", raw_content, count=1, flags=re.DOTALL | re.IGNORECASE)
-                            else:
-                                new_text = f"---\n{tag_block}\n---\n\n" + raw_content.lstrip()
-                            if not new_text.startswith("---"):
-                                new_text = f"---\n{new_text.lstrip()}"
-                        else:
-                            meta = dict(post.metadata)
-                            meta["tags"] = parsed_tags
-                            if "tag" in meta:
-                                del meta["tag"]
-                            post.metadata = meta
-                            new_text = frontmatter.dumps(post)
+                        meta["tags"] = parsed_tags
+                        if "tag" in meta:
+                            del meta["tag"]
 
-                        with open(abs_p, "w", encoding="utf-8") as f:
-                            f.write(new_text)
+                    # 2. URL
+                    if "url" not in meta or not meta["url"]:
+                        urls = re.findall(r'https?://[^\s><"\')]+', raw_content)
+                        if urls:
+                            meta["url"] = urls[0].rstrip(".,;:!)")
 
-                        updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
-                        if updated_note:
-                            self.cache_manager.incremental_update_file(updated_note)
+                    # 3. Author
+                    if "author" not in meta or not meta["author"]:
+                        patterns = [
+                            r'\*\*(?:Author|By|Written by):\*\*\s*([^\n\r]+)',
+                            r'(?:^|\n)(?:Author|By|Written by):\s*([^\n\r]+)',
+                        ]
+                        for pat in patterns:
+                            matches = re.findall(pat, raw_content, flags=re.IGNORECASE)
+                            if matches:
+                                clean_a = matches[0].strip(" *_`#")
+                                if clean_a:
+                                    meta["author"] = clean_a
+                                    break
+
+                    # 4. Created Date
+                    if "created" not in meta or not meta["created"]:
+                        try:
+                            stat_info = abs_p.stat()
+                            ctime = getattr(stat_info, 'st_ctime', stat_info.st_mtime)
+                            dt = datetime.fromtimestamp(ctime)
+                            meta["created"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        except Exception:
+                            pass
+
+                    # 5. Rebuild & Write
+                    if not post or not hasattr(post, 'metadata'):
+                        post = frontmatter.Post(body_text, **meta)
+                    else:
+                        post.metadata = meta
+
+                    new_text = frontmatter.dumps(post)
+                    with open(abs_p, "w", encoding="utf-8") as f:
+                        f.write(new_text)
+
+                    updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
+                    if updated_note:
+                        self.cache_manager.incremental_update_file(updated_note)
                 except Exception as e:
-                    print(f"Error fixing YAML tags for {rel_p}: {e}")
+                    print(f"Error auto-formatting YAML for {rel_p}: {e}")
 
         self.yaml_updated.emit()
         self.load_data()
