@@ -705,10 +705,8 @@ class NoteEditorPanel(QWidget):
             self.editor.setPlainText(new_content)
             self._on_save()
 
-            QMessageBox.information(
-                self, "Read Tags Success",
-                f"Successfully added {len(new_tags)} new tag(s) to YAML frontmatter:\n" + ", ".join([f"#{t}" for t in sorted(list(new_tags))])
-            )
+            self.lbl_autosave_status.setText(f"✓ Added {len(new_tags)} tag(s) to YAML")
+            self.lbl_autosave_status.setStyleSheet("color: #2ecc71; font-size: 11px; font-weight: bold;")
         except Exception as e:
             QMessageBox.critical(self, "Read Tags Error", f"Failed to parse or update YAML frontmatter: {e}")
 
@@ -725,7 +723,8 @@ class NoteEditorPanel(QWidget):
                 cleaned_urls.append(clean)
 
         if not cleaned_urls:
-            QMessageBox.information(self, "Read URL", "No web URLs found in note body text.")
+            self.lbl_autosave_status.setText("ℹ No URLs found in body")
+            self.lbl_autosave_status.setStyleSheet("color: #777777; font-size: 11px;")
             return
 
         target_url = ""
@@ -751,7 +750,8 @@ class NoteEditorPanel(QWidget):
             self.editor.setPlainText(new_content)
             self._on_save()
 
-            QMessageBox.information(self, "Read URL Success", f"Updated YAML url property to:\n{target_url}")
+            self.lbl_autosave_status.setText("✓ Set YAML url property")
+            self.lbl_autosave_status.setStyleSheet("color: #2ecc71; font-size: 11px; font-weight: bold;")
         except Exception as e:
             QMessageBox.critical(self, "Read URL Error", f"Failed to update YAML url property: {e}")
 
@@ -774,7 +774,8 @@ class NoteEditorPanel(QWidget):
                     found_authors.append(clean)
 
         if not found_authors:
-            QMessageBox.information(self, "Read Author", "No author pattern (e.g. **Author:** Name) found in note body text.")
+            self.lbl_autosave_status.setText("ℹ No author pattern found in body")
+            self.lbl_autosave_status.setStyleSheet("color: #777777; font-size: 11px;")
             return
 
         target_author = ""
@@ -802,7 +803,8 @@ class NoteEditorPanel(QWidget):
             self.editor.setPlainText(new_content)
             self._on_save()
 
-            QMessageBox.information(self, "Read Author Success", f"Updated YAML author property to:\n{target_author}")
+            self.lbl_autosave_status.setText("✓ Set YAML author property")
+            self.lbl_autosave_status.setStyleSheet("color: #2ecc71; font-size: 11px; font-weight: bold;")
         except Exception as e:
             QMessageBox.critical(self, "Read Author Error", f"Failed to update YAML author property: {e}")
 
@@ -836,13 +838,11 @@ class NoteEditorPanel(QWidget):
 
             new_content = frontmatter.dumps(post)
             self.editor.setPlainText(new_content)
-            self.preview_browser.setMarkdown(new_content)
+            self._render_markdown_preview(new_content)
             self._on_save()
 
-            QMessageBox.information(
-                self, "Capture Created Date Success",
-                f"Successfully captured file creation date into YAML frontmatter:\ncreated: {created_str}"
-            )
+            self.lbl_autosave_status.setText("✓ Set YAML created date")
+            self.lbl_autosave_status.setStyleSheet("color: #2ecc71; font-size: 11px; font-weight: bold;")
         except Exception as e:
             QMessageBox.critical(self, "Capture Created Date Error", f"Failed to capture created date: {e}")
 
@@ -911,7 +911,8 @@ class NoteEditorPanel(QWidget):
                     parsed_tags.append(k)
 
         if not parsed_tags:
-            QMessageBox.information(self, "Fix YAML Tags", "No tags found in YAML metadata or note body text to format.")
+            self.lbl_autosave_status.setText("ℹ No tags found to format")
+            self.lbl_autosave_status.setStyleSheet("color: #777777; font-size: 11px;")
             return
 
         # 4. Rebuild clean frontmatter
@@ -936,11 +937,8 @@ class NoteEditorPanel(QWidget):
             self._render_markdown_preview(new_content)
             self._on_save()
 
-            QMessageBox.information(
-                self, "Fix YAML Tags Success",
-                f"Successfully captured and formatted {len(parsed_tags)} tag(s) into clean kebab-case list format:\n\n" +
-                "\n".join([f"  - {t}" for t in parsed_tags])
-            )
+            self.lbl_autosave_status.setText(f"✓ Fixed {len(parsed_tags)} YAML tag(s)")
+            self.lbl_autosave_status.setStyleSheet("color: #2ecc71; font-size: 11px; font-weight: bold;")
         except Exception as e:
             QMessageBox.critical(self, "Fix YAML Tags Error", f"Failed to format YAML frontmatter tags: {e}")
 
