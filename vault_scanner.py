@@ -56,8 +56,10 @@ class VaultScanner:
 
                 # 2. Bucket
                 bucket_val = str(meta.pop("bucket", "") or meta.pop("type", "")).strip().lower()
-                if bucket_val in {"note", "idea", "wip", "task"}:
+                if bucket_val in {"note", "idea", "wip", "task", "dailynote"}:
                     bucket = bucket_val
+                elif bucket_val in {"daily", "daily-note", "journal"}:
+                    bucket = "dailynote"
                 elif bucket_val:
                     is_ambiguous = True
 

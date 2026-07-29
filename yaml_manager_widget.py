@@ -33,7 +33,7 @@ class YamlResolutionDialog(QDialog):
         self.abs_path = Path(vault_path) / rel_path
 
         self.setWindowTitle(f"🛠️ Resolve Frontmatter — {Path(rel_path).name}")
-        self.resize(800, 520)
+        self.resize(800, 480)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1e1e1e;
@@ -95,7 +95,7 @@ class YamlResolutionDialog(QDialog):
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(10)
+        right_layout.setSpacing(12)
 
         right_layout.addWidget(QLabel("<b>Map Standard YAML Fields:</b>"))
 
@@ -103,7 +103,7 @@ class YamlResolutionDialog(QDialog):
         h_bucket = QHBoxLayout()
         h_bucket.addWidget(QLabel("Bucket:"))
         self.combo_bucket = QComboBox()
-        self.combo_bucket.addItems(["note", "idea", "wip", "task"])
+        self.combo_bucket.addItems(["note", "idea", "wip", "task", "dailynote"])
         h_bucket.addWidget(self.combo_bucket)
         right_layout.addLayout(h_bucket)
 
@@ -122,17 +122,6 @@ class YamlResolutionDialog(QDialog):
         self.combo_attention.addItems(["✅ settled", "⚡ needs-revisit", "📌 pinned"])
         h_att.addWidget(self.combo_attention)
         right_layout.addLayout(h_att)
-
-        # Daily Note
-        self.chk_daily = QCheckBox("Mark as Daily Note")
-        right_layout.addWidget(self.chk_daily)
-
-        # Author Input
-        h_auth = QHBoxLayout()
-        h_auth.addWidget(QLabel("Author:"))
-        self.input_author = QLineEdit()
-        h_auth.addWidget(self.input_author)
-        right_layout.addLayout(h_auth)
 
         # URL Input
         h_url = QHBoxLayout()
@@ -184,8 +173,6 @@ class YamlResolutionDialog(QDialog):
                 att_map = {"settled": 0, "needs-revisit": 1, "pinned": 2}
                 self.combo_attention.setCurrentIndex(att_map.get(note.attention, 0))
 
-                self.chk_daily.setChecked(note.daily_note)
-                self.input_author.setText(note.author)
                 self.input_url.setText(note.url or note.detected_body_url)
 
         except Exception as e:
@@ -210,9 +197,6 @@ class YamlResolutionDialog(QDialog):
             clean_att = "settled" if "settled" in att_text else ("needs-revisit" if "needs-revisit" in att_text else "pinned")
             meta["attention"] = clean_att
 
-            meta["daily_note"] = self.chk_daily.isChecked()
-            if self.input_author.text().strip():
-                meta["author"] = self.input_author.text().strip()
             if self.input_url.text().strip():
                 meta["url"] = self.input_url.text().strip()
 
@@ -255,7 +239,7 @@ class YamlManagerWidget(QWidget):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(8)
 
-        # Header Frame: Batch Toolbar & Filters
+        # Header Frame: Batch Toolbar & Column Header Filters
         header_frame = QFrame()
         header_frame.setStyleSheet("""
             QFrame {
@@ -300,7 +284,7 @@ class YamlManagerWidget(QWidget):
         batch_row.addWidget(QLabel("<b>Batch Update Selected:</b>"))
 
         self.combo_batch_bucket = QComboBox()
-        self.combo_batch_bucket.addItems(["Set Bucket...", "note", "idea", "wip", "task"])
+        self.combo_batch_bucket.addItems(["Set Bucket...", "note", "idea", "wip", "task", "dailynote"])
         batch_row.addWidget(self.combo_batch_bucket)
 
         self.combo_batch_status = QComboBox()
@@ -325,19 +309,19 @@ class YamlManagerWidget(QWidget):
         batch_row.addStretch()
         header_layout.addLayout(batch_row)
 
-        # Row 2: Search & Filters
+        # Row 2: Header Filters Bar (Filters matching columns)
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
 
-        filter_row.addWidget(QLabel("Filter:"))
+        filter_row.addWidget(QLabel("<b>Column Filters:</b>"))
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Filter title, path, author, url...")
+        self.search_input.setPlaceholderText("🔍 Filter note title, path, or URL...")
         self.search_input.textChanged.connect(self.load_data)
         filter_row.addWidget(self.search_input, stretch=1)
 
         self.combo_filter_bucket = QComboBox()
-        self.combo_filter_bucket.addItems(["Bucket: All", "note", "idea", "wip", "task"])
+        self.combo_filter_bucket.addItems(["Bucket: All", "note", "idea", "wip", "task", "dailynote"])
         self.combo_filter_bucket.currentIndexChanged.connect(self.load_data)
         filter_row.addWidget(self.combo_filter_bucket)
 
@@ -353,11 +337,13 @@ class YamlManagerWidget(QWidget):
 
         self.chk_only_ambiguous = QCheckBox("⚠️ Show Flagged Only")
         self.chk_only_ambiguous.setStyleSheet("color: #e67e22; font-weight: bold;")
+        self.chk_only_ambiguous.setToolTip("Show only notes with non-standard or unparseable YAML frontmatter")
         self.chk_only_ambiguous.stateChanged.connect(self.load_data)
         filter_row.addWidget(self.chk_only_ambiguous)
 
         self.chk_only_urls = QCheckBox("🌐 Body URLs Found")
         self.chk_only_urls.setStyleSheet("color: #007acc;")
+        self.chk_only_urls.setToolTip("Show only notes where web links were detected inside body text but missing in YAML")
         self.chk_only_urls.stateChanged.connect(self.load_data)
         filter_row.addWidget(self.chk_only_urls)
 
@@ -366,18 +352,16 @@ class YamlManagerWidget(QWidget):
 
         # Main Table Widget
         self.table_widget = QTableWidget()
-        self.table_widget.setColumnCount(8)
+        self.table_widget.setColumnCount(6)
         self.table_widget.setHorizontalHeaderLabels([
-            "Select", "Note Title / Path", "Bucket", "Status (Heat)", "Attention", "Daily", "Author", "URL / Actions"
+            "Select", "Note Title / Path", "Bucket ▼", "Status (Heat) ▼", "Attention ▼", "URL / Actions"
         ])
         self.table_widget.setColumnWidth(0, 50)
-        self.table_widget.setColumnWidth(1, 240)
-        self.table_widget.setColumnWidth(2, 100)
-        self.table_widget.setColumnWidth(3, 115)
-        self.table_widget.setColumnWidth(4, 130)
-        self.table_widget.setColumnWidth(5, 55)
-        self.table_widget.setColumnWidth(6, 120)
-        self.table_widget.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        self.table_widget.setColumnWidth(1, 280)
+        self.table_widget.setColumnWidth(2, 125)
+        self.table_widget.setColumnWidth(3, 125)
+        self.table_widget.setColumnWidth(4, 135)
+        self.table_widget.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
 
         self.table_widget.setStyleSheet("""
             QTableWidget {
@@ -446,7 +430,7 @@ class YamlManagerWidget(QWidget):
 
             # 2. Bucket Dropdown
             combo_b = QComboBox()
-            combo_b.addItems(["note", "idea", "wip", "task"])
+            combo_b.addItems(["note", "idea", "wip", "task", "dailynote"])
             idx_b = combo_b.findText(n["bucket"])
             if idx_b >= 0:
                 combo_b.setCurrentIndex(idx_b)
@@ -469,24 +453,7 @@ class YamlManagerWidget(QWidget):
             combo_a.currentIndexChanged.connect(lambda _, r=row_idx, c=combo_a: self._on_row_attention_changed(r, c.currentText()))
             self.table_widget.setCellWidget(row_idx, 4, combo_a)
 
-            # 5. Daily Note Checkbox
-            chk_daily = QCheckBox()
-            chk_daily.setChecked(n["daily_note"])
-            chk_daily_w = QWidget()
-            l_daily = QHBoxLayout(chk_daily_w)
-            l_daily.addWidget(chk_daily)
-            l_daily.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            l_daily.setContentsMargins(0, 0, 0, 0)
-            chk_daily.stateChanged.connect(lambda state, r=row_idx: self._on_row_yaml_changed(r, "daily_note", bool(state)))
-            self.table_widget.setCellWidget(row_idx, 5, chk_daily_w)
-
-            # 6. Author Input
-            input_auth = QLineEdit(n["author"])
-            input_auth.setPlaceholderText("Author...")
-            input_auth.editingFinished.connect(lambda r=row_idx, i=input_auth: self._on_row_yaml_changed(r, "author", i.text()))
-            self.table_widget.setCellWidget(row_idx, 6, input_auth)
-
-            # 7. URL / Actions Cell
+            # 5. URL / Actions Cell
             url_widget = QWidget()
             url_layout = QHBoxLayout(url_widget)
             url_layout.setContentsMargins(2, 0, 2, 0)
@@ -510,7 +477,7 @@ class YamlManagerWidget(QWidget):
                 btn_resolve.clicked.connect(lambda _, path=n["path"]: self.open_resolution_dialog(path))
                 url_layout.addWidget(btn_resolve)
 
-            self.table_widget.setCellWidget(row_idx, 7, url_widget)
+            self.table_widget.setCellWidget(row_idx, 5, url_widget)
 
         self.ignore_cell_signals = False
 
