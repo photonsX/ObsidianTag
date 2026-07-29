@@ -359,7 +359,6 @@ class NoteEditorPanel(QWidget):
         if available_tags:
             self.editor.set_tags_list(available_tags)
         self.editor.setPlainText(content)
-        self.editor.setFocus()
 
     def _read_tags_from_body(self):
         content = self.editor.toPlainText()

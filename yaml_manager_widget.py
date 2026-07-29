@@ -90,6 +90,7 @@ class YamlManagerWidget(QWidget):
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 Filter note title or relative path...")
         self.search_input.textChanged.connect(self.load_data)
+        self.search_input.returnPressed.connect(self._focus_table)
         filter_row.addWidget(self.search_input, stretch=1)
 
         left_layout.addWidget(header_frame)
@@ -208,9 +209,11 @@ class YamlManagerWidget(QWidget):
                 item_title.setSelected(True)
                 item_num.setSelected(True)
 
-        self.ignore_cell_signals = False
-        self.table_widget.verticalScrollBar().setValue(v_scroll)
-        self._on_table_selection_changed()
+    def _focus_table(self):
+        if self.table_widget.rowCount() > 0:
+            self.table_widget.setFocus()
+            if not self._get_selected_rows():
+                self.table_widget.selectRow(0)
 
     def _get_selected_rows(self) -> List[int]:
         selected_rows = set()
