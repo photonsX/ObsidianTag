@@ -169,32 +169,30 @@ class YamlManagerWidget(QWidget):
             post = frontmatter.loads(raw_content)
             meta = dict(post.metadata)
 
-            # 1. No YAML tags present in frontmatter
-            if "tags" not in meta and "tag" not in meta:
+            # If note has NO frontmatter block (empty metadata dictionary)
+            if not meta:
                 return "NO_YAML"
 
-            raw_tags = meta.get("tags") if "tags" in meta else meta.get("tag")
-
-            if raw_tags is None or raw_tags == [] or raw_tags == "":
-                return "NO_YAML"
-
-            # 2. Uses singular 'tag' key instead of 'tags'
+            # Check if tags field uses singular 'tag' key instead of 'tags'
             if "tag" in meta and "tags" not in meta:
                 return "NEEDS_FIX"
 
-            # 3. Raw string instead of YAML list
-            if isinstance(raw_tags, str):
-                return "NEEDS_FIX"
+            raw_tags = meta.get("tags")
 
-            # 4. List elements containing spaces, commas, or hashtags
-            if isinstance(raw_tags, list):
-                for t in raw_tags:
-                    if not isinstance(t, str):
-                        return "NEEDS_FIX"
-                    if " " in t or "," in t or t.startswith("#"):
-                        return "NEEDS_FIX"
+            if raw_tags is not None:
+                # Raw string instead of clean YAML list
+                if isinstance(raw_tags, str):
+                    return "NEEDS_FIX"
 
-            # 5. Clean, valid YAML tags list
+                # List elements containing spaces, commas, or hashtags
+                if isinstance(raw_tags, list):
+                    for t in raw_tags:
+                        if not isinstance(t, str):
+                            return "NEEDS_FIX"
+                        if " " in t or "," in t or t.startswith("#"):
+                            return "NEEDS_FIX"
+
+            # Note has valid YAML frontmatter metadata (e.g. bucket: dailynote)
             return "VALID"
         except Exception:
             return "NO_YAML"
