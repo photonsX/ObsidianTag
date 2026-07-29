@@ -225,6 +225,7 @@ class YamlManagerWidget(QWidget):
         self.cache_manager = cache_manager
         self.vault_path = vault_path
         self.notes_data: List[dict] = []
+        self.saved_selected_paths: set = set()
         self.ignore_cell_signals = False
 
         self.setup_ui()
@@ -383,7 +384,25 @@ class YamlManagerWidget(QWidget):
                 background-color: #04395e;
             }
         """)
+        self.table_widget.itemSelectionChanged.connect(self._on_table_selection_changed)
         main_layout.addWidget(self.table_widget, stretch=1)
+
+    def _on_table_selection_changed(self):
+        if self.ignore_cell_signals:
+            return
+        selected_paths = set()
+        if self.table_widget.selectionModel():
+            for idx in self.table_widget.selectionModel().selectedRows():
+                r = idx.row()
+                if 0 <= r < len(self.notes_data):
+                    selected_paths.add(self.notes_data[r]["path"])
+        for item in self.table_widget.selectedItems():
+            r = item.row()
+            if 0 <= r < len(self.notes_data):
+                selected_paths.add(self.notes_data[r]["path"])
+
+        if selected_paths:
+            self.saved_selected_paths = selected_paths
 
     def load_data(self):
         self.ignore_cell_signals = True
@@ -427,6 +446,10 @@ class YamlManagerWidget(QWidget):
             if n["is_ambiguous"]:
                 item_title.setForeground(QColor("#e67e22"))
             self.table_widget.setItem(row_idx, 1, item_title)
+
+            # Re-apply selection state if saved
+            if n["path"] in self.saved_selected_paths:
+                item_title.setSelected(True)
 
             # 2. Bucket Dropdown
             combo_b = QComboBox()
@@ -488,15 +511,21 @@ class YamlManagerWidget(QWidget):
 
     def _get_selected_row_indices(self, trigger_row: Optional[int] = None) -> List[int]:
         selected_set = set()
-        
-        # 1. Standard table row selection (Shift+Click, Ctrl+Click, drag selection)
+
+        # 1. From saved_selected_paths
+        if self.saved_selected_paths:
+            for idx, n in enumerate(self.notes_data):
+                if n["path"] in self.saved_selected_paths:
+                    selected_set.add(idx)
+
+        # 2. From active selection model
         if self.table_widget.selectionModel():
             for model_index in self.table_widget.selectionModel().selectedRows():
                 selected_set.add(model_index.row())
             for item in self.table_widget.selectedItems():
                 selected_set.add(item.row())
 
-        # 2. Checkboxes in Col 0
+        # 3. Checkboxes in Col 0
         for r in range(self.table_widget.rowCount()):
             w = self.table_widget.cellWidget(r, 0)
             if w:
@@ -504,7 +533,7 @@ class YamlManagerWidget(QWidget):
                 if chk and chk.isChecked():
                     selected_set.add(r)
 
-        # 3. Always include trigger row if specified
+        # 4. Include trigger row if specified
         if trigger_row is not None:
             selected_set.add(trigger_row)
 
