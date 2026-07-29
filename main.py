@@ -370,25 +370,36 @@ class MainWindow(QMainWindow):
         self.watcher_thread.start()
 
     def _on_file_changed(self, abs_path_str: str, event_type: str):
-        vault_p = Path(self.config_manager.get("vault_path"))
-        abs_p = Path(abs_path_str)
+        try:
+            vault_p_str = self.config_manager.get("vault_path")
+            if not vault_p_str:
+                return
 
-        if event_type == "deleted":
-            rel_p = str(abs_p.relative_to(vault_p)).replace("\\", "/")
-            dummy_note = Note(path=rel_p)
-            self.cache_manager.incremental_update_file(dummy_note, is_delete=True)
-        else:
-            note = VaultScanner.scan_file(abs_p, vault_p)
-            if note:
-                self.cache_manager.incremental_update_file(note, is_delete=False)
+            vault_p = Path(vault_p_str).resolve()
+            abs_p = Path(abs_path_str).resolve()
 
-        sort_order = self.config_manager.get("sort_order", "count_desc")
-        self.table_widget.reload_tags(filter_query=self.search_bar.text(), sort_by=sort_order)
-        self.temporal_widget.load_data()
-        self.yaml_manager_widget.load_data()
+            try:
+                rel_p = str(abs_p.relative_to(vault_p)).replace("\\", "/")
+            except ValueError:
+                return
 
-        stats = self.cache_manager.get_tag_stats()
-        self.lbl_status_info.setText(f"Vault updated incrementally | {stats.total_tags} tags | {stats.total_notes} notes")
+            if event_type == "deleted":
+                self.cache_manager.remove_file(rel_p)
+            else:
+                if abs_p.exists():
+                    note = VaultScanner.scan_file(abs_p, vault_p)
+                    if note:
+                        self.cache_manager.incremental_update_file(note, is_delete=False)
+
+            sort_order = self.config_manager.get("sort_order", "count_desc")
+            self.table_widget.reload_tags(filter_query=self.search_bar.text(), sort_by=sort_order)
+            self.temporal_widget.load_data()
+            self.yaml_manager_widget.load_data()
+
+            stats = self.cache_manager.get_tag_stats()
+            self.lbl_status_info.setText(f"Vault updated incrementally | {stats.total_tags} tags | {stats.total_notes} notes")
+        except Exception as e:
+            print(f"Error handling external file change event: {e}")
 
     def _on_temporal_note_saved(self, rel_path: str):
         sort_order = self.config_manager.get("sort_order", "count_desc")
