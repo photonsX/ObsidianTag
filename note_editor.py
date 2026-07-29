@@ -528,6 +528,82 @@ class NoteEditorPanel(QWidget):
             }}
         """)
 
+    def _render_markdown_preview(self, raw_text: str):
+        if not raw_text.strip():
+            self.preview_browser.setHtml("")
+            return
+
+        properties_html = ""
+        body_content = raw_text
+
+        try:
+            post = frontmatter.loads(raw_text)
+            meta = dict(post.metadata)
+            body_content = post.content
+
+            if meta:
+                prop_rows = []
+                for k, v in meta.items():
+                    key_display = str(k).lower()
+                    if key_display in ("tags", "tag"):
+                        tags_list = []
+                        if isinstance(v, list):
+                            tags_list = [str(x) for x in v]
+                        elif isinstance(v, str):
+                            tags_list = [x.strip() for x in re.split(r"[,;\s]+", v) if x.strip()]
+
+                        pill_htmls = []
+                        for t in tags_list:
+                            t_clean = t.lstrip("#")
+                            pill_htmls.append(
+                                f'<span style="background-color: #04395e; color: #4ec9b0; padding: 2px 8px; border-radius: 10px; font-weight: bold; margin-right: 4px;">#{t_clean}</span>'
+                            )
+                        val_html = " ".join(pill_htmls) if pill_htmls else "<i>none</i>"
+                        prop_rows.append(f'<tr><td style="color: #888888; padding: 3px 10px 3px 0px; font-weight: bold; width: 100px;">🏷️ tags:</td><td>{val_html}</td></tr>')
+                    elif key_display == "url":
+                        url_str = str(v).strip()
+                        val_html = f'<a href="{url_str}" style="color: #4ec9b0; text-decoration: underline;">{url_str}</a>' if url_str else "<i>none</i>"
+                        prop_rows.append(f'<tr><td style="color: #888888; padding: 3px 10px 3px 0px; font-weight: bold;">🌐 url:</td><td>{val_html}</td></tr>')
+                    elif key_display == "author":
+                        prop_rows.append(f'<tr><td style="color: #888888; padding: 3px 10px 3px 0px; font-weight: bold;">✍️ author:</td><td style="color: #d4d4d4;">{v}</td></tr>')
+                    elif key_display == "bucket":
+                        prop_rows.append(f'<tr><td style="color: #888888; padding: 3px 10px 3px 0px; font-weight: bold;">📁 bucket:</td><td style="color: #ce9178; font-weight: bold;">{v}</td></tr>')
+                    elif key_display == "status":
+                        prop_rows.append(f'<tr><td style="color: #888888; padding: 3px 10px 3px 0px; font-weight: bold;">🔥 status:</td><td style="color: #ce9178; font-weight: bold;">{v}</td></tr>')
+                    elif key_display == "attention":
+                        prop_rows.append(f'<tr><td style="color: #888888; padding: 3px 10px 3px 0px; font-weight: bold;">⚡ attention:</td><td style="color: #ce9178; font-weight: bold;">{v}</td></tr>')
+                    elif key_display == "created":
+                        prop_rows.append(f'<tr><td style="color: #888888; padding: 3px 10px 3px 0px; font-weight: bold;">📅 created:</td><td style="color: #9cdcfe;">{v}</td></tr>')
+                    else:
+                        prop_rows.append(f'<tr><td style="color: #888888; padding: 3px 10px 3px 0px; font-weight: bold;">⚙️ {k}:</td><td style="color: #cccccc;">{v}</td></tr>')
+
+                if prop_rows:
+                    rows_joined = "".join(prop_rows)
+                    properties_html = f'''
+                    <div style="background-color: #252526; border: 1px solid #3c3c3c; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-family: Consolas, monospace; font-size: 12px;">
+                        <div style="color: #007acc; font-weight: bold; margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">⚙️ YAML Properties</div>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            {rows_joined}
+                        </table>
+                    </div>
+                    '''
+        except Exception:
+            pass
+
+        tmp_doc = QTextBrowser()
+        tmp_doc.setMarkdown(body_content)
+        body_html = tmp_doc.toHtml()
+
+        if properties_html:
+            if "<body>" in body_html:
+                final_html = body_html.replace("<body>", f"<body>{properties_html}")
+            else:
+                final_html = properties_html + body_html
+        else:
+            final_html = body_html
+
+        self.preview_browser.setHtml(final_html)
+
     def _set_view_mode(self, mode: str):
         self.current_view_mode = mode
         if mode == "source":
@@ -537,7 +613,7 @@ class NoteEditorPanel(QWidget):
         else:
             self.btn_mode_source.setChecked(False)
             self.btn_mode_preview.setChecked(True)
-            self.preview_browser.setMarkdown(self.editor.toPlainText())
+            self._render_markdown_preview(self.editor.toPlainText())
             self.editor_stack.setCurrentWidget(self.preview_browser)
 
     def load_note(self, rel_path: str, content: str, available_tags: list = None):
@@ -548,7 +624,7 @@ class NoteEditorPanel(QWidget):
             self.editor.set_tags_list(available_tags)
 
         self.editor.setPlainText(content)
-        self.preview_browser.setMarkdown(content)
+        self._render_markdown_preview(content)
 
         self._set_controls_enabled(True)
         self._set_view_mode(getattr(self, 'current_view_mode', 'source'))
