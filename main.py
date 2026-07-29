@@ -493,6 +493,12 @@ class MainWindow(QMainWindow):
             "<p><b>Version:</b> 1.0.0<br><b>Engine:</b> SQLite3 + Watchdog</p>"
         )
 
+    def changeEvent(self, event):
+        if event.type() == Qt.Event.Type.ActivationChange and self.isActiveWindow():
+            if hasattr(self, 'yaml_manager_widget'):
+                self.yaml_manager_widget.load_data()
+        super().changeEvent(event)
+
     def closeEvent(self, event):
         # Save geometry
         geom_hex = self.saveGeometry().toHex().data().decode("ascii")

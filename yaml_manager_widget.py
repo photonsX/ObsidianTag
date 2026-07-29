@@ -384,6 +384,12 @@ class YamlManagerWidget(QWidget):
             }
         """)
 
+        # 0. Refresh List Action
+        act_refresh = menu.addAction("🔄 Refresh List")
+        act_refresh.triggered.connect(self._refresh_vault_and_list)
+
+        menu.addSeparator()
+
         # Header Title
         lbl_header = menu.addAction(f"⚡ Batch Update ({count_str})")
         lbl_header.setEnabled(False)
@@ -557,6 +563,12 @@ class YamlManagerWidget(QWidget):
         # Reload data & update live preview if 1 note selected
         self.load_data()
 
+    def _refresh_vault_and_list(self):
+        if self.vault_path:
+            VaultScanner.scan_vault(Path(self.vault_path), self.cache_manager)
+            self.yaml_updated.emit()
+            self.load_data()
+
     def _on_table_selection_changed(self):
         if self.ignore_cell_signals:
             return
@@ -570,18 +582,25 @@ class YamlManagerWidget(QWidget):
                 rel_path = note_info["path"]
                 abs_path = Path(self.vault_path) / rel_path
 
-                if abs_path.exists():
-                    try:
-                        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
-                            content = f.read()
+                if not abs_path.exists():
+                    # File was deleted externally on disk! Remove from cache and refresh table cleanly.
+                    self.cache_manager.remove_file(rel_path)
+                    self.yaml_updated.emit()
+                    self.editor_panel.clear_and_disable("Note file was deleted externally")
+                    self.load_data()
+                    return
 
-                        stats = self.cache_manager.get_tag_stats()
-                        all_tags = [t.name for t in stats.all_tags] if hasattr(stats, 'all_tags') else []
+                try:
+                    with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
 
-                        self.editor_panel.load_note(rel_path, content, all_tags)
-                        return
-                    except Exception as e:
-                        print(f"Error reading note preview: {e}")
+                    stats = self.cache_manager.get_tag_stats()
+                    all_tags = [t.name for t in stats.all_tags] if hasattr(stats, 'all_tags') else []
+
+                    self.editor_panel.load_note(rel_path, content, all_tags)
+                    return
+                except Exception as e:
+                    print(f"Error reading note preview: {e}")
 
         elif len(selected_rows) > 1:
             self.editor_panel.clear_and_disable(f"Multiple notes selected ({len(selected_rows)} notes)")
@@ -593,6 +612,13 @@ class YamlManagerWidget(QWidget):
             return
 
         abs_path = Path(self.vault_path) / rel_path
+        if not abs_path.exists():
+            self.cache_manager.remove_file(rel_path)
+            self.yaml_updated.emit()
+            self.editor_panel.clear_and_disable("Note file no longer exists on disk")
+            self.load_data()
+            return
+
         try:
             with open(abs_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
