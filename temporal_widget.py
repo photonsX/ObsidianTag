@@ -263,8 +263,8 @@ class TemporalViewWidget(QWidget):
         self.splitter.addWidget(self.tree_widget)
 
         # Right Pane: Embedded Editor
-        self.editor_panel = NoteEditorPanel(vault_path=self.vault_path)
-        self.editor_panel.note_saved.connect(self._on_note_saved)
+        self.editor_panel = NoteEditorPanel()
+        self.editor_panel.save_requested.connect(self._on_save_note)
         self.splitter.addWidget(self.editor_panel)
 
         # Set initial splitter proportions (45/55)
@@ -407,9 +407,33 @@ class TemporalViewWidget(QWidget):
             return
         item = selected[0]
         rel_path = item.data(0, Qt.ItemDataRole.UserRole)
-        if rel_path:
-            self.editor_panel.open_note(rel_path)
+        if rel_path and self.vault_path:
+            abs_p = Path(self.vault_path) / rel_path
+            if abs_p.exists():
+                try:
+                    with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                    all_tags_dicts = self.cache_manager.get_all_tags()
+                    all_tags = [f"#{t['name']}" for t in all_tags_dicts if t['name'] != "untagged"]
+                    self.editor_panel.load_note(rel_path, content, available_tags=all_tags)
+                except Exception as e:
+                    print(f"Error opening note {rel_path}: {e}")
 
-    def _on_note_saved(self, rel_path: str):
-        self.load_data()
-        self.note_saved.emit(rel_path)
+    def _on_save_note(self, rel_path: str, content: str):
+        if not self.vault_path or not rel_path:
+            return
+        abs_p = Path(self.vault_path) / rel_path
+        try:
+            with open(abs_p, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            from vault_scanner import VaultScanner
+            updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
+            if updated_note:
+                self.cache_manager.incremental_update_file(updated_note)
+
+            self.load_data()
+            self.note_saved.emit(rel_path)
+        except Exception as e:
+            print(f"Error saving note {rel_path}: {e}")
+
