@@ -529,6 +529,7 @@ class NoteEditorPanel(QWidget):
         """)
 
     def _set_view_mode(self, mode: str):
+        self.current_view_mode = mode
         if mode == "source":
             self.btn_mode_source.setChecked(True)
             self.btn_mode_preview.setChecked(False)
@@ -550,7 +551,7 @@ class NoteEditorPanel(QWidget):
         self.preview_browser.setMarkdown(content)
 
         self._set_controls_enabled(True)
-        self._set_view_mode("source")
+        self._set_view_mode(getattr(self, 'current_view_mode', 'source'))
 
         # Stop any active timer
         self.autosave_timer.stop()
