@@ -186,7 +186,6 @@ class YamlResolutionDialog(QDialog):
             post = frontmatter.loads(raw_text)
             meta = dict(post.metadata)
 
-            # Map values
             meta["bucket"] = self.combo_bucket.currentText()
 
             st_text = self.combo_status.currentText()
@@ -237,17 +236,17 @@ class YamlManagerWidget(QWidget):
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(6, 6, 6, 6)
+        main_layout.setSpacing(6)
 
-        # Header Frame: Batch Toolbar & Column Header Filters
+        # Excel-Style Header Frame: Clean Filter Bar
         header_frame = QFrame()
         header_frame.setStyleSheet("""
             QFrame {
                 background-color: #252526;
                 border: 1px solid #333333;
-                border-radius: 6px;
-                padding: 6px;
+                border-radius: 4px;
+                padding: 4px 8px;
             }
             QLabel {
                 color: #cccccc;
@@ -260,64 +259,22 @@ class YamlManagerWidget(QWidget):
                 border: 1px solid #3c3c3c;
                 border-radius: 4px;
                 padding: 4px 8px;
+                font-size: 12px;
             }
-            QPushButton {
-                background-color: #0e639c;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 12px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #1177bb;
+            QCheckBox {
+                color: #cccccc;
+                font-size: 12px;
             }
         """)
 
-        header_layout = QVBoxLayout(header_frame)
-        header_layout.setSpacing(6)
-
-        # Row 1: Batch Actions Bar
-        batch_row = QHBoxLayout()
-        batch_row.setSpacing(8)
-
-        batch_row.addWidget(QLabel("<b>Batch Update Selected:</b>"))
-
-        self.combo_batch_bucket = QComboBox()
-        self.combo_batch_bucket.addItems(["Set Bucket...", "note", "idea", "wip", "task", "dailynote"])
-        batch_row.addWidget(self.combo_batch_bucket)
-
-        self.combo_batch_status = QComboBox()
-        self.combo_batch_status.addItems(["Set Status...", "🔥 hot", "☀️ warm", "❄️ cool", "🧊 cold"])
-        batch_row.addWidget(self.combo_batch_status)
-
-        self.combo_batch_attention = QComboBox()
-        self.combo_batch_attention.addItems(["Set Attention...", "✅ settled", "⚡ needs-revisit", "📌 pinned"])
-        batch_row.addWidget(self.combo_batch_attention)
-
-        btn_apply_batch = QPushButton("⚡ Apply Batch")
-        btn_apply_batch.clicked.connect(self._apply_batch_updates)
-        batch_row.addWidget(btn_apply_batch)
-
-        batch_row.addSpacing(15)
-
-        btn_scan_urls = QPushButton("🔍 Auto-Add All Body URLs to YAML")
-        btn_scan_urls.setStyleSheet("background-color: #2d8a4e;")
-        btn_scan_urls.clicked.connect(self._auto_add_all_body_urls)
-        batch_row.addWidget(btn_scan_urls)
-
-        batch_row.addStretch()
-        header_layout.addLayout(batch_row)
-
-        # Row 2: Header Filters Bar (Filters matching columns)
-        filter_row = QHBoxLayout()
+        filter_row = QHBoxLayout(header_frame)
+        filter_row.setContentsMargins(4, 4, 4, 4)
         filter_row.setSpacing(8)
 
-        filter_row.addWidget(QLabel("<b>Column Filters:</b>"))
+        filter_row.addWidget(QLabel("<b>Excel Filter:</b>"))
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Filter note title, path, or URL...")
+        self.search_input.setPlaceholderText("🔍 Search note title or relative file path...")
         self.search_input.textChanged.connect(self.load_data)
         filter_row.addWidget(self.search_input, stretch=1)
 
@@ -336,52 +293,64 @@ class YamlManagerWidget(QWidget):
         self.combo_filter_att.currentIndexChanged.connect(self.load_data)
         filter_row.addWidget(self.combo_filter_att)
 
-        self.chk_only_ambiguous = QCheckBox("⚠️ Show Flagged Only")
+        self.chk_only_ambiguous = QCheckBox("⚠️ Flagged Only")
         self.chk_only_ambiguous.setStyleSheet("color: #e67e22; font-weight: bold;")
-        self.chk_only_ambiguous.setToolTip("Show only notes with non-standard or unparseable YAML frontmatter")
         self.chk_only_ambiguous.stateChanged.connect(self.load_data)
         filter_row.addWidget(self.chk_only_ambiguous)
 
-        self.chk_only_urls = QCheckBox("🌐 Body URLs Found")
-        self.chk_only_urls.setStyleSheet("color: #007acc;")
-        self.chk_only_urls.setToolTip("Show only notes where web links were detected inside body text but missing in YAML")
-        self.chk_only_urls.stateChanged.connect(self.load_data)
-        filter_row.addWidget(self.chk_only_urls)
-
-        header_layout.addLayout(filter_row)
         main_layout.addWidget(header_frame)
 
-        # Main Table Widget
+        # Excel Grid Table Widget
         self.table_widget = QTableWidget()
-        self.table_widget.setColumnCount(6)
+        self.table_widget.setColumnCount(7)
         self.table_widget.setHorizontalHeaderLabels([
-            "Select", "Note Title / Path", "Bucket ▼", "Status (Heat) ▼", "Attention ▼", "URL / Actions"
+            "#", "Note Title", "Path", "Bucket ▼", "Status (Heat) ▼", "Attention ▼", "URL / Actions"
         ])
-        self.table_widget.setColumnWidth(0, 50)
-        self.table_widget.setColumnWidth(1, 280)
-        self.table_widget.setColumnWidth(2, 125)
+        self.table_widget.setColumnWidth(0, 40)
+        self.table_widget.setColumnWidth(1, 220)
+        self.table_widget.setColumnWidth(2, 220)
         self.table_widget.setColumnWidth(3, 125)
-        self.table_widget.setColumnWidth(4, 135)
-        self.table_widget.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.table_widget.setColumnWidth(4, 125)
+        self.table_widget.setColumnWidth(5, 135)
+        self.table_widget.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+
+        # Spreadsheet styling: Crisp grid lines, alternating rows, compact 26px height
+        self.table_widget.setShowGrid(True)
+        self.table_widget.setAlternatingRowColors(True)
+        self.table_widget.verticalHeader().setDefaultSectionSize(28)
+        self.table_widget.verticalHeader().setVisible(False)
 
         self.table_widget.setStyleSheet("""
             QTableWidget {
                 background-color: #1e1e1e;
+                alternate-background-color: #242424;
                 color: #d4d4d4;
-                gridline-color: #2d2d2d;
-                border: 1px solid #2d2d2d;
-                border-radius: 6px;
+                gridline-color: #333333;
+                border: 1px solid #333333;
                 font-size: 12px;
             }
             QHeaderView::section {
                 background-color: #252526;
                 color: #cccccc;
-                padding: 6px;
-                border: none;
+                padding: 4px;
+                border: 1px solid #333333;
                 font-weight: bold;
             }
+            QTableWidget::item {
+                padding: 2px 4px;
+                border: none;
+            }
             QTableWidget::item:selected {
-                background-color: #04395e;
+                background-color: #0e639c;
+                color: #ffffff;
+            }
+            QComboBox {
+                background-color: #2a2a2a;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+                border-radius: 2px;
+                padding: 1px 4px;
+                font-size: 11px;
             }
         """)
         self.table_widget.itemSelectionChanged.connect(self._on_table_selection_changed)
@@ -413,7 +382,6 @@ class YamlManagerWidget(QWidget):
         att_text = self.combo_filter_att.currentText().replace("Attention: ", "")
 
         only_amb = self.chk_only_ambiguous.isChecked()
-        only_url = self.chk_only_urls.isChecked()
 
         self.notes_data = self.cache_manager.get_all_yaml_notes(
             bucket_filter=b_text,
@@ -421,23 +389,20 @@ class YamlManagerWidget(QWidget):
             attention_filter=att_text,
             filter_query=query,
             only_ambiguous=only_amb,
-            only_url_detected=only_url
+            only_url_detected=False
         )
 
         self.table_widget.setRowCount(0)
         self.table_widget.setRowCount(len(self.notes_data))
 
         for row_idx, n in enumerate(self.notes_data):
-            # 0. Checkbox
-            chk = QCheckBox()
-            chk_widget = QWidget()
-            chk_layout = QHBoxLayout(chk_widget)
-            chk_layout.addWidget(chk)
-            chk_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            chk_layout.setContentsMargins(0, 0, 0, 0)
-            self.table_widget.setCellWidget(row_idx, 0, chk_widget)
+            # 0. Row #
+            item_num = QTableWidgetItem(str(row_idx + 1))
+            item_num.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_num.setForeground(QColor("#777777"))
+            self.table_widget.setItem(row_idx, 0, item_num)
 
-            # 1. Title Item
+            # 1. Note Title
             title_text = f"📄 {n['title']}"
             if n["is_ambiguous"]:
                 title_text = f"⚠️ {n['title']} (Flagged)"
@@ -447,36 +412,43 @@ class YamlManagerWidget(QWidget):
                 item_title.setForeground(QColor("#e67e22"))
             self.table_widget.setItem(row_idx, 1, item_title)
 
-            # Re-apply selection state if saved
-            if n["path"] in self.saved_selected_paths:
-                item_title.setSelected(True)
+            # 2. Relative Path
+            item_path = QTableWidgetItem(n["path"])
+            item_path.setForeground(QColor("#888888"))
+            self.table_widget.setItem(row_idx, 2, item_path)
 
-            # 2. Bucket Dropdown
+            # Apply selection state if path in saved selection
+            if n["path"] in self.saved_selected_paths:
+                item_num.setSelected(True)
+                item_title.setSelected(True)
+                item_path.setSelected(True)
+
+            # 3. Bucket Dropdown
             combo_b = QComboBox()
             combo_b.addItems(["note", "idea", "wip", "task", "dailynote"])
             idx_b = combo_b.findText(n["bucket"])
             if idx_b >= 0:
                 combo_b.setCurrentIndex(idx_b)
             combo_b.currentIndexChanged.connect(lambda _, r=row_idx, c=combo_b: self._on_row_yaml_changed(r, "bucket", c.currentText()))
-            self.table_widget.setCellWidget(row_idx, 2, combo_b)
+            self.table_widget.setCellWidget(row_idx, 3, combo_b)
 
-            # 3. Status (Heat) Dropdown
+            # 4. Status (Heat) Dropdown
             combo_s = QComboBox()
             combo_s.addItems(["🔥 hot", "☀️ warm", "❄️ cool", "🧊 cold"])
             st_map = {"hot": 0, "warm": 1, "cool": 2, "cold": 3}
             combo_s.setCurrentIndex(st_map.get(n["status"], 0))
             combo_s.currentIndexChanged.connect(lambda _, r=row_idx, c=combo_s: self._on_row_status_changed(r, c.currentText()))
-            self.table_widget.setCellWidget(row_idx, 3, combo_s)
+            self.table_widget.setCellWidget(row_idx, 4, combo_s)
 
-            # 4. Attention Dropdown
+            # 5. Attention Dropdown
             combo_a = QComboBox()
             combo_a.addItems(["✅ settled", "⚡ needs-revisit", "📌 pinned"])
             att_map = {"settled": 0, "needs-revisit": 1, "pinned": 2}
             combo_a.setCurrentIndex(att_map.get(n["attention"], 0))
             combo_a.currentIndexChanged.connect(lambda _, r=row_idx, c=combo_a: self._on_row_attention_changed(r, c.currentText()))
-            self.table_widget.setCellWidget(row_idx, 4, combo_a)
+            self.table_widget.setCellWidget(row_idx, 5, combo_a)
 
-            # 5. URL / Actions Cell
+            # 6. URL / Actions Cell
             url_widget = QWidget()
             url_layout = QHBoxLayout(url_widget)
             url_layout.setContentsMargins(2, 0, 2, 0)
@@ -488,19 +460,19 @@ class YamlManagerWidget(QWidget):
             url_layout.addWidget(input_url, stretch=1)
 
             if n["detected_body_url"] and not n["url"]:
-                btn_add_url = QPushButton("➕ Add Link")
+                btn_add_url = QPushButton("➕ Link")
                 btn_add_url.setToolTip(f"Add detected body link: {n['detected_body_url']}")
-                btn_add_url.setStyleSheet("background-color: #2d8a4e; color: #fff; padding: 2px 6px; font-size: 10px;")
+                btn_add_url.setStyleSheet("background-color: #2d8a4e; color: #fff; padding: 1px 4px; font-size: 10px;")
                 btn_add_url.clicked.connect(lambda _, r=row_idx, link=n["detected_body_url"]: self._add_detected_url(r, link))
                 url_layout.addWidget(btn_add_url)
 
             if n["is_ambiguous"]:
                 btn_resolve = QPushButton("🛠️ Fix")
-                btn_resolve.setStyleSheet("background-color: #e67e22; color: #fff; padding: 2px 8px; font-weight: bold;")
+                btn_resolve.setStyleSheet("background-color: #e67e22; color: #fff; padding: 1px 6px; font-weight: bold; font-size: 10px;")
                 btn_resolve.clicked.connect(lambda _, path=n["path"]: self.open_resolution_dialog(path))
                 url_layout.addWidget(btn_resolve)
 
-            self.table_widget.setCellWidget(row_idx, 5, url_widget)
+            self.table_widget.setCellWidget(row_idx, 6, url_widget)
 
         self.ignore_cell_signals = False
 
@@ -525,104 +497,11 @@ class YamlManagerWidget(QWidget):
             for item in self.table_widget.selectedItems():
                 selected_set.add(item.row())
 
-        # 3. Checkboxes in Col 0
-        for r in range(self.table_widget.rowCount()):
-            w = self.table_widget.cellWidget(r, 0)
-            if w:
-                chk = w.findChild(QCheckBox)
-                if chk and chk.isChecked():
-                    selected_set.add(r)
-
-        # 4. Include trigger row if specified
+        # 3. Include trigger row if specified
         if trigger_row is not None:
             selected_set.add(trigger_row)
 
         return sorted(list(selected_set))
-
-    def _apply_batch_updates(self):
-        rows = self._get_selected_row_indices()
-        if not rows:
-            QMessageBox.information(self, "No Selection", "Please check or select at least one note to batch update.")
-            return
-
-        b_val = self.combo_batch_bucket.currentText()
-        st_val = self.combo_batch_status.currentText()
-        att_val = self.combo_batch_attention.currentText()
-
-        clean_st = None
-        if st_val != "Set Status...":
-            clean_st = "hot" if "hot" in st_val else ("warm" if "warm" in st_val else ("cool" if "cool" in st_val else "cold"))
-
-        clean_att = None
-        if att_val != "Set Attention...":
-            clean_att = "settled" if "settled" in att_val else ("needs-revisit" if "needs-revisit" in att_val else "pinned")
-
-        clean_b = b_val if b_val != "Set Bucket..." else None
-
-        for r in rows:
-            n = self.notes_data[r]
-            rel_p = n["path"]
-            abs_p = Path(self.vault_path) / rel_p
-
-            if not abs_p.exists():
-                continue
-
-            try:
-                with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
-                    raw_content = f.read()
-
-                post = frontmatter.loads(raw_content)
-                meta = dict(post.metadata)
-
-                if clean_b:
-                    meta["bucket"] = clean_b
-                if clean_st:
-                    meta["status"] = clean_st
-                if clean_att:
-                    meta["attention"] = clean_att
-
-                post.metadata = meta
-                new_text = frontmatter.dumps(post)
-
-                with open(abs_p, "w", encoding="utf-8") as f:
-                    f.write(new_text)
-
-                updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
-                if updated_note:
-                    self.cache_manager.incremental_update_file(updated_note)
-
-            except Exception as e:
-                print(f"Error updating note {rel_p}: {e}")
-
-        self.load_data()
-        self.yaml_updated.emit()
-
-    def _auto_add_all_body_urls(self):
-        count = 0
-        for n in self.notes_data:
-            if n["detected_body_url"] and not n["url"]:
-                rel_p = n["path"]
-                abs_p = Path(self.vault_path) / rel_p
-                if abs_p.exists():
-                    try:
-                        with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
-                            raw_content = f.read()
-                        post = frontmatter.loads(raw_content)
-                        meta = dict(post.metadata)
-                        meta["url"] = n["detected_body_url"]
-                        post.metadata = meta
-                        with open(abs_p, "w", encoding="utf-8") as f:
-                            f.write(frontmatter.dumps(post))
-                        updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
-                        if updated_note:
-                            self.cache_manager.incremental_update_file(updated_note)
-                        count += 1
-                    except Exception as e:
-                        print(f"Error auto adding URL to {rel_p}: {e}")
-
-        QMessageBox.information(self, "URLs Added", f"Successfully added detected URLs to {count} note(s)!")
-        self.load_data()
-        self.yaml_updated.emit()
 
     def _add_detected_url(self, row_idx: int, link: str):
         n = self.notes_data[row_idx]
