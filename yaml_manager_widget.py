@@ -730,5 +730,13 @@ class YamlManagerWidget(QWidget):
                 self.cache_manager.incremental_update_file(updated_note)
 
             self.yaml_updated.emit()
+
+            note_name = Path(rel_path).name
+            if self.editor_panel.current_rel_path == rel_path:
+                self.editor_panel.lbl_autosave_status.setText("✓ Auto-saved")
+                self.editor_panel.lbl_autosave_status.setStyleSheet("color: #2ecc71; font-size: 11px; font-weight: bold;")
+            else:
+                self.editor_panel.lbl_autosave_status.setText(f"✓ Saved: {note_name}")
+                self.editor_panel.lbl_autosave_status.setStyleSheet("color: #2ecc71; font-size: 11px; font-weight: bold;")
         except Exception as e:
             print(f"Error saving note in YamlManagerWidget: {e}")

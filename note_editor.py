@@ -497,6 +497,8 @@ class NoteEditorPanel(QWidget):
             self.autosave_timer.stop()
 
     def clear_and_disable(self, message: str):
+        if self.current_rel_path and self.autosave_timer.isActive():
+            self._on_save()
         self.current_rel_path = ""
         self.ignore_text_changes = True
         self.editor.setPlainText("")
@@ -622,6 +624,13 @@ class NoteEditorPanel(QWidget):
             self.editor_stack.setCurrentWidget(self.preview_browser)
 
     def load_note(self, rel_path: str, content: str, available_tags: list = None):
+        previous_saved_name = ""
+
+        # Flush pending auto-save for previous note if user switches note before countdown finishes
+        if self.current_rel_path and self.current_rel_path != rel_path and self.autosave_timer.isActive():
+            previous_saved_name = Path(self.current_rel_path).name
+            self._on_save()
+
         self.ignore_text_changes = True
         self.current_rel_path = rel_path
 
@@ -634,11 +643,15 @@ class NoteEditorPanel(QWidget):
         self._set_controls_enabled(True)
         self._set_view_mode(getattr(self, 'current_view_mode', 'source'))
 
-        # Stop any active timer
         self.autosave_timer.stop()
         self.btn_cancel_autosave.hide()
-        self.lbl_autosave_status.setText("Ready")
-        self.lbl_autosave_status.setStyleSheet("color: #007acc; font-size: 11px; font-weight: bold;")
+
+        if previous_saved_name:
+            self.lbl_autosave_status.setText(f"✓ Saved: {previous_saved_name}")
+            self.lbl_autosave_status.setStyleSheet("color: #2ecc71; font-size: 11px; font-weight: bold;")
+        else:
+            self.lbl_autosave_status.setText("Ready")
+            self.lbl_autosave_status.setStyleSheet("color: #007acc; font-size: 11px; font-weight: bold;")
 
         self.ignore_text_changes = False
 
