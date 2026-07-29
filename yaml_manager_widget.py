@@ -209,6 +209,10 @@ class YamlManagerWidget(QWidget):
                 item_title.setSelected(True)
                 item_num.setSelected(True)
 
+        self.ignore_cell_signals = False
+        self.table_widget.verticalScrollBar().setValue(v_scroll)
+        self._on_table_selection_changed()
+
     def _focus_table(self):
         if self.table_widget.rowCount() > 0:
             self.table_widget.setFocus()
