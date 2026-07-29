@@ -392,6 +392,10 @@ class NoteEditorPanel(QWidget):
         act_author = read_menu.addAction("✍️ Read Author (Extract Body Author to YAML)")
         act_author.triggered.connect(self._read_author_from_body)
 
+        read_menu.addSeparator()
+        act_fix_tags = read_menu.addAction("🛠️ Fix YAML Tags (Kebab-case List Format)")
+        act_fix_tags.triggered.connect(self._fix_yaml_tags_in_note)
+
         self.btn_read_from.setMenu(read_menu)
 
         self.btn_save = QPushButton("💾 Save (Ctrl+S)")
@@ -724,6 +728,58 @@ class NoteEditorPanel(QWidget):
             QMessageBox.information(self, "Read Author Success", f"Updated YAML author property to:\n{target_author}")
         except Exception as e:
             QMessageBox.critical(self, "Read Author Error", f"Failed to update YAML author property: {e}")
+
+    def _fix_yaml_tags_in_note(self):
+        content = self.editor.toPlainText()
+        if not content.strip():
+            return
+
+        try:
+            post = frontmatter.loads(content)
+            meta = dict(post.metadata)
+
+            raw_tags = meta.get("tags") or meta.get("tag")
+            parsed_tags = []
+
+            if isinstance(raw_tags, str):
+                items = re.split(r"[,;\s]+", raw_tags)
+                for it in items:
+                    clean = it.strip(" []#\"'")
+                    if clean:
+                        kebab = re.sub(r'\s+', '-', clean)
+                        if kebab and kebab not in parsed_tags:
+                            parsed_tags.append(kebab)
+            elif isinstance(raw_tags, list):
+                for item in raw_tags:
+                    if isinstance(item, str):
+                        sub_items = re.split(r"[,;\n]+", item)
+                        for sub in sub_items:
+                            clean = sub.strip(" []#\"'")
+                            if clean:
+                                kebab = re.sub(r'\s+', '-', clean)
+                                if kebab and kebab not in parsed_tags:
+                                    parsed_tags.append(kebab)
+
+            if not parsed_tags:
+                QMessageBox.information(self, "Fix YAML Tags", "No tags found in YAML metadata to format.")
+                return
+
+            meta["tags"] = parsed_tags
+            if "tag" in meta:
+                del meta["tag"]
+            post.metadata = meta
+
+            new_content = frontmatter.dumps(post)
+            self.editor.setPlainText(new_content)
+            self.preview_browser.setMarkdown(new_content)
+
+            QMessageBox.information(
+                self, "Fix YAML Tags Success",
+                f"Successfully formatted {len(parsed_tags)} tag(s) into clean kebab-case nested list format:\n\n" +
+                "\n".join([f"  - {t}" for t in parsed_tags])
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Fix YAML Tags Error", f"Failed to format YAML frontmatter tags: {e}")
 
     def _on_save(self):
         if not self.current_rel_path:

@@ -284,7 +284,69 @@ class YamlManagerWidget(QWidget):
         act_url = menu.addAction("🔗 Add URL Property")
         act_url.triggered.connect(lambda _, rows=selected_rows: self._batch_add_url_property(rows))
 
+        # 5. Fix YAML Tags Action
+        act_fix = menu.addAction("🛠️ Fix YAML Tags (Kebab-case List Format)")
+        act_fix.triggered.connect(lambda _, rows=selected_rows: self._batch_fix_yaml_tags(rows))
+
         menu.exec(self.table_widget.viewport().mapToGlobal(pos))
+
+    def _batch_fix_yaml_tags(self, rows: List[int]):
+        for r in rows:
+            if 0 <= r < len(self.notes_data):
+                n = self.notes_data[r]
+                rel_p = n["path"]
+                abs_p = Path(self.vault_path) / rel_p
+
+                if not abs_p.exists():
+                    continue
+
+                try:
+                    with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
+                        raw_content = f.read()
+
+                    post = frontmatter.loads(raw_content)
+                    meta = dict(post.metadata)
+
+                    raw_tags = meta.get("tags") or meta.get("tag")
+                    parsed_tags = []
+
+                    if isinstance(raw_tags, str):
+                        items = re.split(r"[,;\s]+", raw_tags)
+                        for it in items:
+                            clean = it.strip(" []#\"'")
+                            if clean:
+                                kebab = re.sub(r'\s+', '-', clean)
+                                if kebab and kebab not in parsed_tags:
+                                    parsed_tags.append(kebab)
+                    elif isinstance(raw_tags, list):
+                        for item in raw_tags:
+                            if isinstance(item, str):
+                                sub_items = re.split(r"[,;\n]+", item)
+                                for sub in sub_items:
+                                    clean = sub.strip(" []#\"'")
+                                    if clean:
+                                        kebab = re.sub(r'\s+', '-', clean)
+                                        if kebab and kebab not in parsed_tags:
+                                            parsed_tags.append(kebab)
+
+                    if parsed_tags:
+                        meta["tags"] = parsed_tags
+                        if "tag" in meta:
+                            del meta["tag"]
+                        post.metadata = meta
+
+                        new_text = frontmatter.dumps(post)
+                        with open(abs_p, "w", encoding="utf-8") as f:
+                            f.write(new_text)
+
+                        updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
+                        if updated_note:
+                            self.cache_manager.incremental_update_file(updated_note)
+                except Exception as e:
+                    print(f"Error fixing YAML tags for {rel_p}: {e}")
+
+        self.yaml_updated.emit()
+        self.load_data()
 
     def _batch_add_url_property(self, rows: List[int]):
         for r in rows:
