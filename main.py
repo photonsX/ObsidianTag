@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QSplitter, QFileDialog, QMessageBox, QProgressBar, QLabel,
     QStatusBar, QDialog, QFormLayout, QPushButton, QMenu, QTabWidget
 )
-from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtCore import Qt, QSize, QTimer, QEvent
 from PyQt6.QtGui import QIcon, QAction
 
 from config_manager import ConfigManager
@@ -494,7 +494,7 @@ class MainWindow(QMainWindow):
         )
 
     def changeEvent(self, event):
-        if event.type() == Qt.Event.Type.ActivationChange and self.isActiveWindow():
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
             if hasattr(self, 'yaml_manager_widget'):
                 self.yaml_manager_widget.load_data()
         super().changeEvent(event)
