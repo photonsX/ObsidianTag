@@ -1,0 +1,6 @@
+PyQt6>=6.5.0
+python-frontmatter>=1.0.0
+PyYAML>=6.0
+watchdog>=3.0.0
+rapidfuzz>=3.0.0
+pyinstaller>=6.0.0
