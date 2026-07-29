@@ -228,6 +228,28 @@ class CacheManager:
             print(f"Error in incremental update: {e}")
             return False
 
+    def remove_file(self, rel_path: str):
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                norm_path = rel_path.replace("\\", "/")
+                cursor.execute("SELECT id FROM files WHERE path = ?", (norm_path,))
+                row = cursor.fetchone()
+                if row:
+                    file_id = row["id"]
+                    cursor.execute("DELETE FROM file_tags WHERE file_id = ?", (file_id,))
+                    cursor.execute("DELETE FROM files WHERE id = ?", (file_id,))
+                    cursor.execute("""
+                        UPDATE tags SET count = (
+                            SELECT COUNT(*) FROM file_tags WHERE file_tags.tag_id = tags.id
+                        )
+                    """)
+                    cursor.execute("DELETE FROM tags WHERE count = 0")
+                    self._update_materialized_shared_tags(cursor)
+                    conn.commit()
+        except Exception as e:
+            print(f"Error removing file from cache: {e}")
+
     def get_all_tags(self, sort_by="count_desc", filter_query="", show_empty=False, show_orphans=True) -> List[dict]:
         with self._get_connection() as conn:
             cursor = conn.cursor()

@@ -135,6 +135,7 @@ class YamlManagerWidget(QWidget):
         """)
         self.table_widget.itemSelectionChanged.connect(self._on_table_selection_changed)
         self.table_widget.cellClicked.connect(self._on_cell_clicked)
+        self.table_widget.itemChanged.connect(self._on_table_item_changed)
 
         # Enable Context Menu on Note List Table
         self.table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -147,6 +148,7 @@ class YamlManagerWidget(QWidget):
         # RIGHT PANEL: Permanent NoteEditorPanel (Never resizes or swaps layout!)
         self.editor_panel = NoteEditorPanel(parent=self)
         self.editor_panel.save_requested.connect(self._on_note_saved)
+        self.editor_panel.title_renamed.connect(self._rename_note_file)
 
         splitter.addWidget(self.editor_panel)
 
@@ -233,6 +235,7 @@ class YamlManagerWidget(QWidget):
             if n["is_ambiguous"]:
                 title_text = f"⚠️ {n['title']} (Flagged)"
             item_title = QTableWidgetItem(title_text)
+            item_title.setFlags(item_title.flags() | Qt.ItemFlag.ItemIsEditable)
             item_title.setData(Qt.ItemDataRole.UserRole, n["path"])
             if n["is_ambiguous"]:
                 item_title.setForeground(QColor("#e67e22"))
@@ -265,6 +268,65 @@ class YamlManagerWidget(QWidget):
         self.ignore_cell_signals = False
         self.table_widget.verticalScrollBar().setValue(v_scroll)
         self._on_table_selection_changed()
+
+    def _on_table_item_changed(self, item: QTableWidgetItem):
+        if self.ignore_cell_signals or item.column() != 1:
+            return
+        row = item.row()
+        if 0 <= row < len(self.notes_data):
+            old_rel_path = self.notes_data[row]["path"]
+            raw_text = item.text()
+            clean_title = raw_text.replace("📄 ", "").replace("⚠️ ", "").replace(" (Flagged)", "").strip()
+            self._rename_note_file(old_rel_path, clean_title)
+
+    def _rename_note_file(self, old_rel_path: str, new_title_str: str):
+        if not self.vault_path or not old_rel_path:
+            return
+
+        clean_title = re.sub(r'[\\/:*?"<>|]', '', new_title_str).strip()
+        if not clean_title:
+            return
+
+        old_rel = Path(old_rel_path)
+        old_abs = Path(self.vault_path) / old_rel
+
+        if not old_abs.exists():
+            return
+
+        new_filename = f"{clean_title}.md"
+        new_rel = old_rel.parent / new_filename if str(old_rel.parent) != "." else Path(new_filename)
+        new_abs = Path(self.vault_path) / new_rel
+
+        if old_abs.resolve() == new_abs.resolve():
+            return
+
+        if new_abs.exists():
+            QMessageBox.warning(self, "Rename Failed", f"A note file named '{new_filename}' already exists!")
+            self.load_data()
+            return
+
+        try:
+            old_abs.rename(new_abs)
+
+            self.cache_manager.remove_file(str(old_rel).replace("\\", "/"))
+            updated_note = VaultScanner.scan_file(new_abs, Path(self.vault_path))
+            if updated_note:
+                self.cache_manager.incremental_update_file(updated_note)
+
+            self.yaml_updated.emit()
+            self.load_data()
+        except Exception as e:
+            QMessageBox.critical(self, "Rename Error", f"Failed to rename note file on disk: {e}")
+            self.load_data()
+
+    def _open_in_explorer(self, row: int):
+        if not self.vault_path or not (0 <= row < len(self.notes_data)):
+            return
+        n = self.notes_data[row]
+        abs_p = (Path(self.vault_path) / n["path"]).resolve()
+        if abs_p.exists():
+            import subprocess
+            subprocess.Popen(f'explorer /select,"{abs_p}"')
 
     def _focus_table(self):
         if self.table_widget.rowCount() > 0:
@@ -357,6 +419,12 @@ class YamlManagerWidget(QWidget):
         # 5. Fix YAML Tags Action
         act_fix = menu.addAction("🛠️ Fix YAML Tags (Kebab-case List Format)")
         act_fix.triggered.connect(lambda _, rows=selected_rows: self._batch_fix_yaml_tags(rows))
+
+        menu.addSeparator()
+
+        # 6. View in File Explorer Action
+        act_explorer = menu.addAction("📂 View in File Explorer")
+        act_explorer.triggered.connect(lambda _, row=clicked_row: self._open_in_explorer(row))
 
         menu.exec(self.table_widget.viewport().mapToGlobal(pos))
 
