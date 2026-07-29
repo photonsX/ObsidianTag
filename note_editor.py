@@ -4,9 +4,10 @@ from typing import List, Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QPlainTextEdit, QFrame, QCompleter, QMenu, QDialog, QListWidget, QMessageBox
+    QPlainTextEdit, QFrame, QCompleter, QMenu, QDialog, QListWidget, QMessageBox,
+    QStackedWidget, QTextBrowser, QCheckBox
 )
-from PyQt6.QtCore import pyqtSignal, Qt, QRect, QSize, QStringListModel
+from PyQt6.QtCore import pyqtSignal, Qt, QRect, QSize, QStringListModel, QTimer
 from PyQt6.QtGui import QFont, QColor, QPainter, QTextFormat, QKeySequence, QFontMetrics, QShortcut, QTextCursor
 
 
@@ -253,19 +254,92 @@ class NoteEditorPanel(QWidget):
     def __init__(self, parent=None, font_size=13):
         super().__init__(parent)
         self.current_rel_path = ""
+        self.ignore_text_changes = False
+        self.countdown_seconds = 5
         self.setMinimumHeight(300)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 8, 10, 8)
         main_layout.setSpacing(6)
 
-        # Toolbar
+        # Toolbar Row
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(0, 0, 0, 0)
-        toolbar.setSpacing(8)
+        toolbar.setSpacing(6)
 
         self.lbl_title = QLabel("Editing Note: None")
         self.lbl_title.setStyleSheet("font-weight: bold; color: #007acc; font-size: 13px;")
+
+        # Mode Toggle Buttons (Source vs Markdown Preview)
+        self.btn_mode_source = QPushButton("📝 Source")
+        self.btn_mode_source.setCheckable(True)
+        self.btn_mode_source.setChecked(True)
+        self.btn_mode_source.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #cccccc;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 11px;
+            }
+            QPushButton:checked {
+                background-color: #0e639c;
+                color: #ffffff;
+                font-weight: bold;
+            }
+        """)
+
+        self.btn_mode_preview = QPushButton("👁️ Preview")
+        self.btn_mode_preview.setCheckable(True)
+        self.btn_mode_preview.setChecked(False)
+        self.btn_mode_preview.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #cccccc;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 11px;
+            }
+            QPushButton:checked {
+                background-color: #0e639c;
+                color: #ffffff;
+                font-weight: bold;
+            }
+        """)
+
+        self.btn_mode_source.clicked.connect(lambda: self._set_view_mode("source"))
+        self.btn_mode_preview.clicked.connect(lambda: self._set_view_mode("preview"))
+
+        # Auto-Save Controls
+        self.chk_autosave = QCheckBox("Auto-Save")
+        self.chk_autosave.setChecked(True)
+        self.chk_autosave.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold;")
+
+        self.lbl_autosave_status = QLabel("")
+        self.lbl_autosave_status.setStyleSheet("color: #e67e22; font-size: 11px; font-weight: bold;")
+
+        self.btn_cancel_autosave = QPushButton("✖ Cancel")
+        self.btn_cancel_autosave.setStyleSheet("""
+            QPushButton {
+                background-color: #d9534f;
+                color: #ffffff;
+                border: none;
+                border-radius: 3px;
+                padding: 2px 8px;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #c9302c; }
+        """)
+        self.btn_cancel_autosave.hide()
+        self.btn_cancel_autosave.clicked.connect(self._cancel_autosave_countdown)
+
+        # Timer setup for 5s auto-save countdown
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.setInterval(1000)
+        self.autosave_timer.timeout.connect(self._on_autosave_tick)
 
         # "Read From..." Dropdown Button
         self.btn_read_from = QPushButton("📖 Read From... ▼")
@@ -275,7 +349,7 @@ class NoteEditorPanel(QWidget):
                 color: #d4d4d4;
                 border: 1px solid #3c3c3c;
                 border-radius: 4px;
-                padding: 5px 12px;
+                padding: 4px 10px;
                 font-weight: bold;
                 font-size: 11px;
             }
@@ -318,8 +392,9 @@ class NoteEditorPanel(QWidget):
                 color: #ffffff;
                 border: none;
                 border-radius: 4px;
-                padding: 5px 14px;
+                padding: 4px 12px;
                 font-weight: bold;
+                font-size: 11px;
             }
             QPushButton:hover { background-color: #1177bb; }
         """)
@@ -332,22 +407,51 @@ class NoteEditorPanel(QWidget):
                 color: #cccccc;
                 border: none;
                 border-radius: 4px;
-                padding: 5px 12px;
+                padding: 4px 10px;
+                font-size: 11px;
             }
             QPushButton:hover { background-color: #505050; }
         """)
         self.btn_cancel.clicked.connect(self._on_cancel)
 
+        # Assemble Toolbar
         toolbar.addWidget(self.lbl_title, stretch=1)
+        toolbar.addWidget(self.btn_mode_source)
+        toolbar.addWidget(self.btn_mode_preview)
+        toolbar.addSpacing(10)
+        toolbar.addWidget(self.chk_autosave)
+        toolbar.addWidget(self.lbl_autosave_status)
+        toolbar.addWidget(self.btn_cancel_autosave)
+        toolbar.addSpacing(10)
         toolbar.addWidget(self.btn_read_from)
         toolbar.addWidget(self.btn_save)
         toolbar.addWidget(self.btn_cancel)
 
         main_layout.addLayout(toolbar)
 
-        # Monospace Text Editor
+        # Editor Stack: Source Code Editor (0) vs Rendered Markdown Preview (1)
+        self.editor_stack = QStackedWidget(self)
+
         self.editor = MarkdownCodeEditor(font_size=font_size)
-        main_layout.addWidget(self.editor, stretch=1)
+        self.editor.textChanged.connect(self._on_text_changed)
+        self.editor_stack.addWidget(self.editor)
+
+        self.preview_browser = QTextBrowser(self)
+        self.preview_browser.setOpenExternalLinks(True)
+        self.preview_browser.setStyleSheet("""
+            QTextBrowser {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                padding: 12px;
+                font-size: 13px;
+                line-height: 1.5;
+            }
+        """)
+        self.editor_stack.addWidget(self.preview_browser)
+
+        main_layout.addWidget(self.editor_stack, stretch=1)
 
         # Shortcuts
         save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
@@ -356,19 +460,90 @@ class NoteEditorPanel(QWidget):
         cancel_shortcut = QShortcut(QKeySequence("Escape"), self)
         cancel_shortcut.activated.connect(self._on_cancel)
 
+        # Initial disabled state (when no note is loaded)
+        self._set_controls_enabled(False)
+
+    def _set_controls_enabled(self, enabled: bool):
+        self.chk_autosave.setEnabled(enabled)
+        self.btn_mode_source.setEnabled(enabled)
+        self.btn_mode_preview.setEnabled(enabled)
+        self.btn_read_from.setEnabled(enabled)
+        self.btn_save.setEnabled(enabled)
+        self.btn_cancel.setEnabled(enabled)
+
+        if not enabled:
+            self.lbl_autosave_status.setText("No active note")
+            self.lbl_autosave_status.setStyleSheet("color: #777777; font-size: 11px;")
+            self.btn_cancel_autosave.hide()
+            self.autosave_timer.stop()
+        else:
+            self.lbl_autosave_status.setText("")
+            self.lbl_autosave_status.setStyleSheet("color: #e67e22; font-size: 11px; font-weight: bold;")
+
+    def _set_view_mode(self, mode: str):
+        if mode == "source":
+            self.btn_mode_source.setChecked(True)
+            self.btn_mode_preview.setChecked(False)
+            self.editor_stack.setCurrentWidget(self.editor)
+        else:
+            self.btn_mode_source.setChecked(False)
+            self.btn_mode_preview.setChecked(True)
+            self.preview_browser.setMarkdown(self.editor.toPlainText())
+            self.editor_stack.setCurrentWidget(self.preview_browser)
+
     def load_note(self, rel_path: str, content: str, available_tags: list = None):
+        self.ignore_text_changes = True
         self.current_rel_path = rel_path
         self.lbl_title.setText(f"📄 Editing Note: {rel_path}")
+
         if available_tags:
             self.editor.set_tags_list(available_tags)
+
         self.editor.setPlainText(content)
+        self.preview_browser.setMarkdown(content)
+
+        self._set_controls_enabled(True)
+        self._set_view_mode("source")
+
+        # Stop any active timer
+        self.autosave_timer.stop()
+        self.btn_cancel_autosave.hide()
+        self.lbl_autosave_status.setText("")
+
+        self.ignore_text_changes = False
+
+    def _on_text_changed(self):
+        if self.ignore_text_changes or not self.current_rel_path:
+            return
+
+        if self.chk_autosave.isChecked():
+            self.countdown_seconds = 5
+            self.lbl_autosave_status.setText(f"⏳ Auto-saving in {self.countdown_seconds}s...")
+            self.btn_cancel_autosave.show()
+            self.autosave_timer.start()
+
+    def _on_autosave_tick(self):
+        self.countdown_seconds -= 1
+        if self.countdown_seconds > 0:
+            self.lbl_autosave_status.setText(f"⏳ Auto-saving in {self.countdown_seconds}s...")
+        else:
+            self.autosave_timer.stop()
+            self.btn_cancel_autosave.hide()
+            self._on_save()
+            self.lbl_autosave_status.setText("✓ Auto-saved")
+            self.lbl_autosave_status.setStyleSheet("color: #2ecc71; font-size: 11px; font-weight: bold;")
+
+    def _cancel_autosave_countdown(self):
+        self.autosave_timer.stop()
+        self.btn_cancel_autosave.hide()
+        self.lbl_autosave_status.setText("⛔ Auto-save cancelled")
+        self.lbl_autosave_status.setStyleSheet("color: #e74c3c; font-size: 11px; font-weight: bold;")
 
     def _read_tags_from_body(self):
         content = self.editor.toPlainText()
         if not content.strip():
             return
 
-        # Extract all #tags from body
         raw_body_tags = re.findall(r'(?:^|\s)#([a-zA-Z0-9_\-/\u00C0-\u024F]+)', content)
         body_tags = set(t.strip() for t in raw_body_tags if t.strip())
 
@@ -414,7 +589,6 @@ class NoteEditorPanel(QWidget):
         if not content.strip():
             return
 
-        # Extract http/https URLs from content
         urls = re.findall(r'https?://[^\s><"\')]+', content)
         cleaned_urls = []
         for u in urls:
@@ -505,8 +679,13 @@ class NoteEditorPanel(QWidget):
     def _on_save(self):
         if not self.current_rel_path:
             return
+        self.autosave_timer.stop()
+        self.btn_cancel_autosave.hide()
         content = self.editor.toPlainText()
         self.save_requested.emit(self.current_rel_path, content)
 
     def _on_cancel(self):
+        self.autosave_timer.stop()
+        self.btn_cancel_autosave.hide()
+        self._set_controls_enabled(False)
         self.cancel_requested.emit()
