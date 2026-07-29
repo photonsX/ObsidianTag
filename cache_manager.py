@@ -542,7 +542,7 @@ class CacheManager:
                 query += " AND (title LIKE ? OR path LIKE ? OR author LIKE ? OR url LIKE ?)"
                 params.extend([f"%{filter_query}%", f"%{filter_query}%", f"%{filter_query}%", f"%{filter_query}%"])
 
-            query += " ORDER BY modified_at DESC"
+            query += " ORDER BY path ASC"
             cursor.execute(query, params)
             rows = cursor.fetchall()
 

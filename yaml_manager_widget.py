@@ -169,6 +169,13 @@ class YamlManagerWidget(QWidget):
         main_layout.addWidget(splitter, stretch=1)
 
     def load_data(self):
+        v_scroll = self.table_widget.verticalScrollBar().value()
+        selected_rows = self._get_selected_rows()
+        saved_paths = set()
+        for r in selected_rows:
+            if 0 <= r < len(self.notes_data):
+                saved_paths.add(self.notes_data[r]["path"])
+
         self.ignore_cell_signals = True
         query = self.search_input.text().strip()
 
@@ -196,7 +203,13 @@ class YamlManagerWidget(QWidget):
                 item_title.setForeground(QColor("#e67e22"))
             self.table_widget.setItem(row_idx, 1, item_title)
 
+            # Re-select row if path matched
+            if n["path"] in saved_paths:
+                item_title.setSelected(True)
+                item_num.setSelected(True)
+
         self.ignore_cell_signals = False
+        self.table_widget.verticalScrollBar().setValue(v_scroll)
         self._on_table_selection_changed()
 
     def _get_selected_rows(self) -> List[int]:
