@@ -167,24 +167,32 @@ class YamlManagerWidget(QWidget):
             post = frontmatter.loads(raw_content)
             meta = dict(post.metadata)
 
+            # 1. No YAML tags present in frontmatter
+            if "tags" not in meta and "tag" not in meta:
+                return "NO_YAML"
+
             raw_tags = meta.get("tags") if "tags" in meta else meta.get("tag")
 
             if raw_tags is None or raw_tags == [] or raw_tags == "":
                 return "NO_YAML"
 
+            # 2. Uses singular 'tag' key instead of 'tags'
             if "tag" in meta and "tags" not in meta:
                 return "NEEDS_FIX"
 
+            # 3. Raw string instead of YAML list
             if isinstance(raw_tags, str):
                 return "NEEDS_FIX"
 
+            # 4. List elements containing spaces, commas, or hashtags
             if isinstance(raw_tags, list):
                 for t in raw_tags:
                     if not isinstance(t, str):
                         return "NEEDS_FIX"
-                    if " " in t or t.startswith("#") or "," in t:
+                    if " " in t or "," in t or t.startswith("#"):
                         return "NEEDS_FIX"
 
+            # 5. Clean, valid YAML tags list
             return "VALID"
         except Exception:
             return "NO_YAML"
@@ -239,7 +247,7 @@ class YamlManagerWidget(QWidget):
             elif status_code == "NO_YAML":
                 item_status = QTableWidgetItem("🚫 No YAML")
                 item_status.setForeground(QColor("#777777"))
-                item_status.setToolTip("No tags found in YAML frontmatter")
+                item_status.setToolTip("No YAML tags present in frontmatter")
             else:
                 item_status = QTableWidgetItem("✅ Valid")
                 item_status.setForeground(QColor("#2ecc71"))
