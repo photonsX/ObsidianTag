@@ -1,10 +1,94 @@
 import re
+import frontmatter
+from typing import List, Optional
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QPlainTextEdit, QFrame, QCompleter
+    QPlainTextEdit, QFrame, QCompleter, QMenu, QDialog, QListWidget, QMessageBox
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QRect, QSize, QStringListModel
 from PyQt6.QtGui import QFont, QColor, QPainter, QTextFormat, QKeySequence, QFontMetrics, QShortcut, QTextCursor
+
+
+class UrlSelectionDialog(QDialog):
+    """
+    Dialog displaying detected web URLs from note body text when multiple URLs exist.
+    Allows user to select which URL to add to the YAML frontmatter.
+    """
+    def __init__(self, urls: List[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("🌐 Select URL for YAML Property")
+        self.resize(550, 300)
+        self.selected_url = ""
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+            }
+            QLabel {
+                color: #cccccc;
+                font-size: 12px;
+            }
+            QListWidget {
+                background-color: #252526;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QListWidget::item {
+                padding: 6px 8px;
+            }
+            QListWidget::item:selected {
+                background-color: #0e639c;
+                color: #ffffff;
+            }
+            QPushButton {
+                background-color: #0e639c;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1177bb;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        layout.addWidget(QLabel("<b>Multiple URLs detected in note text. Select which URL to set as YAML url:</b>"))
+
+        self.list_widget = QListWidget()
+        for u in urls:
+            self.list_widget.addItem(u)
+        self.list_widget.setCurrentRow(0)
+        layout.addWidget(self.list_widget)
+
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setStyleSheet("background-color: #3c3c3c;")
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+
+        btn_ok = QPushButton("✅ Set Selected URL")
+        btn_ok.clicked.connect(self._on_ok)
+        btn_box.addWidget(btn_ok)
+
+        layout.addLayout(btn_box)
+
+    def _on_ok(self):
+        curr = self.list_widget.currentItem()
+        if curr:
+            self.selected_url = curr.text()
+            self.accept()
+
 
 class LineNumberArea(QWidget):
     def __init__(self, editor):
@@ -54,9 +138,8 @@ class MarkdownCodeEditor(QPlainTextEdit):
                     border: 1px solid #007acc;
                     selection-background-color: #04395e;
                     selection-color: #ffffff;
-                    padding: 4px;
-                    font-family: Consolas;
-                    font-size: 13px;
+                    font-family: Consolas, monospace;
+                    font-size: 12px;
                 }
             """)
 
@@ -65,36 +148,9 @@ class MarkdownCodeEditor(QPlainTextEdit):
         self.update_line_number_area_width(0)
 
     def set_tags_list(self, tags: list):
-        formatted = [f"#{t.lstrip('#')}" for t in tags if t]
-        model = QStringListModel(formatted, self.completer)
+        formatted_tags = [f"#{t}" if not t.startswith("#") else t for t in tags]
+        model = QStringListModel(formatted_tags, self.completer)
         self.completer.setModel(model)
-
-    def _text_under_cursor(self) -> str:
-        cursor = self.textCursor()
-        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
-        text = cursor.selectedText()
-        
-        # Look back for # character
-        block_text = self.textCursor().block().text()
-        pos = self.textCursor().positionInBlock()
-        
-        match = re.search(r"#([a-zA-Z0-9_\-/]*)$", block_text[:pos])
-        if match:
-            return f"#{match.group(1)}"
-        return text
-
-    def _insert_completion(self, completion: str):
-        cursor = self.textCursor()
-        block_text = cursor.block().text()
-        pos = cursor.positionInBlock()
-
-        match = re.search(r"#([a-zA-Z0-9_\-/]*)$", block_text[:pos])
-        if match:
-            start_pos = match.start()
-            # Move cursor to start of tag prefix
-            cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor, pos - start_pos)
-            cursor.insertText(completion + " ")
-            self.setTextCursor(cursor)
 
     def line_number_area_width(self):
         digits = 1
@@ -102,7 +158,7 @@ class MarkdownCodeEditor(QPlainTextEdit):
         while max_val >= 10:
             max_val //= 10
             digits += 1
-        space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
+        space = 10 + self.fontMetrics().horizontalAdvance('9') * max(digits, 3)
         return space
 
     def update_line_number_area_width(self, _):
@@ -113,7 +169,6 @@ class MarkdownCodeEditor(QPlainTextEdit):
             self.line_number_area.scroll(0, dy)
         else:
             self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
-
         if rect.contains(self.viewport().rect()):
             self.update_line_number_area_width(0)
 
@@ -128,28 +183,49 @@ class MarkdownCodeEditor(QPlainTextEdit):
 
         block = self.firstVisibleBlock()
         block_number = block.blockNumber()
-        top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
-        bottom = top + round(self.blockBoundingRect(block).height())
+        top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
+        bottom = top + int(self.blockBoundingRect(block).height())
+
+        painter.setPen(QColor("#858585"))
+        font = self.font()
+        font.setPointSize(max(8, font.pointSize() - 2))
+        painter.setFont(font)
 
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
                 number = str(block_number + 1)
-                painter.setPen(QColor("#858585"))
-                painter.drawText(0, top, self.line_number_area.width() - 5, self.fontMetrics().height(), Qt.AlignmentFlag.AlignRight, number)
-
+                painter.drawText(
+                    0, top, self.line_number_area.width() - 5, self.fontMetrics().height(),
+                    Qt.AlignmentFlag.AlignRight, number
+                )
             block = block.next()
             top = bottom
-            bottom = top + round(self.blockBoundingRect(block).height())
+            bottom = top + int(self.blockBoundingRect(block).height())
             block_number += 1
 
+    def _text_under_cursor(self):
+        tc = self.textCursor()
+        tc.select(QTextCursor.SelectionType.WordUnderCursor)
+        text = tc.selectedText()
+        tc.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor, len(text) + 1)
+        sel = tc.selectedText()
+        if sel.startswith("#"):
+            return sel
+        return text
+
+    def _insert_completion(self, completion):
+        tc = self.textCursor()
+        extra = len(completion) - len(self._text_under_cursor())
+        tc.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor, len(self._text_under_cursor()))
+        tc.insertText(completion)
+        self.setTextCursor(tc)
+
     def keyPressEvent(self, event):
-        # Handle active completion popup
         if self.completer and self.completer.popup().isVisible():
-            if event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+            if event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Escape, Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
                 event.ignore()
                 return
 
-        # Insert 4 spaces on Tab key instead of changing focus
         if event.key() == Qt.Key.Key_Tab:
             self.insertPlainText("    ")
             event.accept()
@@ -157,7 +233,6 @@ class MarkdownCodeEditor(QPlainTextEdit):
 
         super().keyPressEvent(event)
 
-        # Trigger tag autocomplete on #
         completion_prefix = self._text_under_cursor()
         if completion_prefix.startswith("#"):
             if completion_prefix != self.completer.completionPrefix():
@@ -187,9 +262,51 @@ class NoteEditorPanel(QWidget):
         # Toolbar
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(0, 0, 0, 0)
+        toolbar.setSpacing(8)
 
         self.lbl_title = QLabel("Editing Note: None")
         self.lbl_title.setStyleSheet("font-weight: bold; color: #007acc; font-size: 13px;")
+
+        # "Read From..." Dropdown Button
+        self.btn_read_from = QPushButton("📖 Read From... ▼")
+        self.btn_read_from.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                padding: 5px 12px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #383838; }
+        """)
+
+        read_menu = QMenu(self)
+        read_menu.setStyleSheet("""
+            QMenu {
+                background-color: #252526;
+                color: #cccccc;
+                border: 1px solid #3c3c3c;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 5px 20px 5px 12px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #04395e;
+                color: #ffffff;
+            }
+        """)
+
+        act_tags = read_menu.addAction("🏷️ Read Tags (Extract #tags to YAML)")
+        act_tags.triggered.connect(self._read_tags_from_body)
+
+        act_url = read_menu.addAction("🌐 Read URL (Extract Body URLs to YAML)")
+        act_url.triggered.connect(self._read_url_from_body)
+
+        self.btn_read_from.setMenu(read_menu)
 
         self.btn_save = QPushButton("💾 Save (Ctrl+S)")
         self.btn_save.setStyleSheet("""
@@ -219,6 +336,7 @@ class NoteEditorPanel(QWidget):
         self.btn_cancel.clicked.connect(self._on_cancel)
 
         toolbar.addWidget(self.lbl_title, stretch=1)
+        toolbar.addWidget(self.btn_read_from)
         toolbar.addWidget(self.btn_save)
         toolbar.addWidget(self.btn_cancel)
 
@@ -242,6 +360,95 @@ class NoteEditorPanel(QWidget):
             self.editor.set_tags_list(available_tags)
         self.editor.setPlainText(content)
         self.editor.setFocus()
+
+    def _read_tags_from_body(self):
+        content = self.editor.toPlainText()
+        if not content.strip():
+            return
+
+        # Extract all #tags from body
+        raw_body_tags = re.findall(r'(?:^|\s)#([a-zA-Z0-9_\-/\u00C0-\u024F]+)', content)
+        body_tags = set(t.strip() for t in raw_body_tags if t.strip())
+
+        if not body_tags:
+            QMessageBox.information(self, "Read Tags", "No #tags found in note body text.")
+            return
+
+        try:
+            post = frontmatter.loads(content)
+            meta = dict(post.metadata)
+
+            existing_yaml_tags = set()
+            tags_val = meta.get("tags") or meta.get("tag")
+            if isinstance(tags_val, str):
+                existing_yaml_tags = set(x.strip() for x in re.split(r"[,,\s]+", tags_val) if x.strip())
+            elif isinstance(tags_val, list):
+                for x in tags_val:
+                    if isinstance(x, str):
+                        existing_yaml_tags.update(t.strip() for t in re.split(r"[,,\s]+", x) if t.strip())
+
+            new_tags = body_tags - existing_yaml_tags
+
+            if not new_tags:
+                QMessageBox.information(self, "Read Tags", "All body #tags are already present in YAML frontmatter.")
+                return
+
+            combined_tags = sorted(list(existing_yaml_tags.union(body_tags)))
+            meta["tags"] = combined_tags
+            post.metadata = meta
+
+            new_content = frontmatter.dumps(post)
+            self.editor.setPlainText(new_content)
+
+            QMessageBox.information(
+                self, "Read Tags Success",
+                f"Successfully added {len(new_tags)} new tag(s) to YAML frontmatter:\n" + ", ".join([f"#{t}" for t in sorted(list(new_tags))])
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Read Tags Error", f"Failed to parse or update YAML frontmatter: {e}")
+
+    def _read_url_from_body(self):
+        content = self.editor.toPlainText()
+        if not content.strip():
+            return
+
+        # Extract http/https URLs from content
+        urls = re.findall(r'https?://[^\s><"\')]+', content)
+        cleaned_urls = []
+        for u in urls:
+            clean = u.rstrip(".,;:!)")
+            if clean and clean not in cleaned_urls:
+                cleaned_urls.append(clean)
+
+        if not cleaned_urls:
+            QMessageBox.information(self, "Read URL", "No web URLs found in note body text.")
+            return
+
+        target_url = ""
+        if len(cleaned_urls) == 1:
+            target_url = cleaned_urls[0]
+        else:
+            dlg = UrlSelectionDialog(cleaned_urls, parent=self)
+            if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_url:
+                target_url = dlg.selected_url
+            else:
+                return
+
+        if not target_url:
+            return
+
+        try:
+            post = frontmatter.loads(content)
+            meta = dict(post.metadata)
+            meta["url"] = target_url
+            post.metadata = meta
+
+            new_content = frontmatter.dumps(post)
+            self.editor.setPlainText(new_content)
+
+            QMessageBox.information(self, "Read URL Success", f"Updated YAML url property to:\n{target_url}")
+        except Exception as e:
+            QMessageBox.critical(self, "Read URL Error", f"Failed to update YAML url property: {e}")
 
     def _on_save(self):
         if not self.current_rel_path:
