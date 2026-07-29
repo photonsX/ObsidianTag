@@ -31,15 +31,37 @@ class CacheManager:
                     title TEXT NOT NULL,
                     modified_at REAL NOT NULL,
                     created_at REAL DEFAULT 0.0,
-                    content_hash TEXT NOT NULL
+                    content_hash TEXT NOT NULL,
+                    bucket TEXT DEFAULT 'note',
+                    status TEXT DEFAULT 'hot',
+                    attention TEXT DEFAULT 'settled',
+                    daily_note INTEGER DEFAULT 0,
+                    author TEXT DEFAULT '',
+                    url TEXT DEFAULT '',
+                    extra_metadata TEXT DEFAULT '{}',
+                    is_ambiguous INTEGER DEFAULT 0,
+                    detected_body_url TEXT DEFAULT ''
                 )
             """)
 
-            # Migration check: Ensure created_at exists in existing DB
+            # Migration check: Ensure created_at & YAML columns exist in existing DB
             cursor.execute("PRAGMA table_info(files)")
             cols = [row["name"] for row in cursor.fetchall()]
-            if "created_at" not in cols:
-                cursor.execute("ALTER TABLE files ADD COLUMN created_at REAL DEFAULT 0.0")
+            new_cols = {
+                "created_at": "REAL DEFAULT 0.0",
+                "bucket": "TEXT DEFAULT 'note'",
+                "status": "TEXT DEFAULT 'hot'",
+                "attention": "TEXT DEFAULT 'settled'",
+                "daily_note": "INTEGER DEFAULT 0",
+                "author": "TEXT DEFAULT ''",
+                "url": "TEXT DEFAULT ''",
+                "extra_metadata": "TEXT DEFAULT '{}'",
+                "is_ambiguous": "INTEGER DEFAULT 0",
+                "detected_body_url": "TEXT DEFAULT ''"
+            }
+            for cname, cdef in new_cols.items():
+                if cname not in cols:
+                    cursor.execute(f"ALTER TABLE files ADD COLUMN {cname} {cdef}")
 
             # Tags table
             cursor.execute("""
@@ -75,6 +97,10 @@ class CacheManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_path ON files(path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_modified ON files(modified_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_created ON files(created_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_bucket ON files(bucket)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_status ON files(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_attention ON files(attention)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_ambiguous ON files(is_ambiguous)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_tags_file ON file_tags(file_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag_id)")
@@ -83,6 +109,7 @@ class CacheManager:
             conn.commit()
 
     def full_scan_update(self, notes_list: List[Note]) -> bool:
+        import json
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -98,9 +125,16 @@ class CacheManager:
                 file_tag_tuples = []
 
                 for note in notes_list:
+                    extra_json = json.dumps(note.extra_metadata) if note.extra_metadata else "{}"
                     cursor.execute(
-                        "INSERT INTO files (path, title, modified_at, created_at, content_hash) VALUES (?, ?, ?, ?, ?)",
-                        (note.path, note.title, note.modified_at, note.created_at, note.content_hash)
+                        """INSERT INTO files 
+                        (path, title, modified_at, created_at, content_hash, bucket, status, attention, daily_note, author, url, extra_metadata, is_ambiguous, detected_body_url) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            note.path, note.title, note.modified_at, note.created_at, note.content_hash,
+                            note.bucket, note.status, note.attention, 1 if note.daily_note else 0,
+                            note.author, note.url, extra_json, 1 if note.is_ambiguous else 0, note.detected_body_url
+                        )
                     )
                     file_id = cursor.lastrowid
 
@@ -141,6 +175,7 @@ class CacheManager:
         """)
 
     def incremental_update_file(self, note: Optional[Note], is_delete=False) -> bool:
+        import json
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -155,9 +190,16 @@ class CacheManager:
                     cursor.execute("DELETE FROM files WHERE id = ?", (file_id,))
 
                 if not is_delete and note:
+                    extra_json = json.dumps(note.extra_metadata) if note.extra_metadata else "{}"
                     cursor.execute(
-                        "INSERT INTO files (path, title, modified_at, created_at, content_hash) VALUES (?, ?, ?, ?, ?)",
-                        (note.path, note.title, note.modified_at, note.created_at, note.content_hash)
+                        """INSERT INTO files 
+                        (path, title, modified_at, created_at, content_hash, bucket, status, attention, daily_note, author, url, extra_metadata, is_ambiguous, detected_body_url) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            note.path, note.title, note.modified_at, note.created_at, note.content_hash,
+                            note.bucket, note.status, note.attention, 1 if note.daily_note else 0,
+                            note.author, note.url, extra_json, 1 if note.is_ambiguous else 0, note.detected_body_url
+                        )
                     )
                     new_file_id = cursor.lastrowid
 
@@ -472,4 +514,81 @@ class CacheManager:
                     day_key = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
                     counts[day_key] = counts.get(day_key, 0) + 1
             return counts
+
+    def get_all_yaml_notes(self, bucket_filter: str = "All", status_filter: str = "All", attention_filter: str = "All", filter_query: str = "", only_ambiguous: bool = False, only_url_detected: bool = False) -> List[dict]:
+        import json
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT id, path, title, modified_at, created_at, bucket, status, attention, daily_note, author, url, extra_metadata, is_ambiguous, detected_body_url
+                FROM files
+                WHERE 1=1
+            """
+            params = []
+            if bucket_filter and bucket_filter != "All":
+                query += " AND bucket = ?"
+                params.append(bucket_filter)
+            if status_filter and status_filter != "All":
+                query += " AND status = ?"
+                params.append(status_filter)
+            if attention_filter and attention_filter != "All":
+                query += " AND attention = ?"
+                params.append(attention_filter)
+            if only_ambiguous:
+                query += " AND is_ambiguous = 1"
+            if only_url_detected:
+                query += " AND detected_body_url != ''"
+            if filter_query:
+                query += " AND (title LIKE ? OR path LIKE ? OR author LIKE ? OR url LIKE ?)"
+                params.extend([f"%{filter_query}%", f"%{filter_query}%", f"%{filter_query}%", f"%{filter_query}%"])
+
+            query += " ORDER BY modified_at DESC"
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            notes = []
+            for r in rows:
+                file_id = r["id"]
+                cursor.execute("""
+                    SELECT t.name
+                    FROM tags t
+                    JOIN file_tags ft ON t.id = ft.tag_id
+                    WHERE ft.file_id = ?
+                    ORDER BY t.name ASC
+                """, (file_id,))
+                tags_list = [f"#{row['name']}" for row in cursor.fetchall()]
+
+                extra_dict = {}
+                if r["extra_metadata"]:
+                    try:
+                        extra_dict = json.loads(r["extra_metadata"])
+                    except Exception:
+                        pass
+
+                notes.append({
+                    "id": file_id,
+                    "path": r["path"],
+                    "title": r["title"],
+                    "modified_at": r["modified_at"],
+                    "created_at": r["created_at"],
+                    "bucket": r["bucket"] or "note",
+                    "status": r["status"] or "hot",
+                    "attention": r["attention"] or "settled",
+                    "daily_note": bool(r["daily_note"]),
+                    "author": r["author"] or "",
+                    "url": r["url"] or "",
+                    "extra_metadata": extra_dict,
+                    "is_ambiguous": bool(r["is_ambiguous"]),
+                    "detected_body_url": r["detected_body_url"] or "",
+                    "tags": tags_list
+                })
+            return notes
+
+    def get_ambiguous_notes_count(self) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) as cnt FROM files WHERE is_ambiguous = 1")
+            row = cursor.fetchone()
+            return row["cnt"] if row else 0
+
 

@@ -30,18 +30,88 @@ class VaultScanner:
 
             # Parse frontmatter and body using python-frontmatter
             fm_tags = set()
+            bucket = "note"
+            status = "hot"
+            attention = "settled"
+            daily_note = False
+            author = ""
+            url = ""
+            extra_metadata = {}
+            is_ambiguous = False
+            body_content = content
+
             try:
                 post = frontmatter.loads(content)
-                tags_val = post.metadata.get("tags") or post.metadata.get("tag")
+                body_content = post.content
+                meta = dict(post.metadata)
+
+                # 1. Tags
+                tags_val = meta.pop("tags", None) or meta.pop("tag", None)
                 if isinstance(tags_val, str):
                     fm_tags.update(t.strip() for t in re.split(r"[,,\s]+", tags_val) if t.strip())
                 elif isinstance(tags_val, list):
                     for t in tags_val:
                         if isinstance(t, str):
                             fm_tags.update(x.strip() for x in re.split(r"[,,\s]+", t) if x.strip())
-                body_content = post.content
-            except Exception:
+
+                # 2. Bucket
+                bucket_val = str(meta.pop("bucket", "") or meta.pop("type", "")).strip().lower()
+                if bucket_val in {"note", "idea", "wip", "task"}:
+                    bucket = bucket_val
+                elif bucket_val:
+                    is_ambiguous = True
+
+                # 3. Status (Heat)
+                status_val = str(meta.pop("status", "")).strip().lower()
+                if status_val in {"hot", "warm", "cool", "cold"}:
+                    status = status_val
+                elif status_val in {"seed", "draft", "raw", "new", "editing", "in-progress"}:
+                    status = "hot"
+                elif status_val in {"developing", "polished", "curated", "evergreen"}:
+                    status = "warm"
+                elif status_val in {"final", "done", "locked"}:
+                    status = "cool"
+                elif status_val in {"archived", "stored"}:
+                    status = "cold"
+                elif status_val:
+                    is_ambiguous = True
+
+                # 4. Attention
+                att_val = str(meta.pop("attention", "") or meta.pop("action", "")).strip().lower()
+                if att_val in {"settled", "needs-revisit", "pinned"}:
+                    attention = att_val
+                elif att_val in {"open", "revisit", "todo", "needs-review"}:
+                    attention = "needs-revisit"
+                elif att_val:
+                    is_ambiguous = True
+
+                # 5. Daily Note
+                dn_val = meta.pop("daily_note", None) or meta.pop("is_daily", None) or meta.pop("daily", None)
+                if dn_val is not None:
+                    daily_note = bool(dn_val)
+
+                # 6. Author
+                author_val = meta.pop("author", None)
+                if author_val:
+                    author = str(author_val).strip()
+
+                # 7. URL
+                url_val = meta.pop("url", None) or meta.pop("link", None)
+                if url_val:
+                    url = str(url_val).strip()
+
+                # 8. Extra Metadata (preserves all custom/unknown keys)
+                extra_metadata = meta
+
+            except Exception as e:
+                is_ambiguous = True
                 body_content = content
+
+            # Body URL Scanner (if url property is missing)
+            detected_url = ""
+            url_match = re.search(r"https?://[^\s><\"\')]+", body_content)
+            if url_match and not url:
+                detected_url = url_match.group(0)
 
             # Extract inline tags from body, ignoring code blocks
             inline_tags = VaultScanner._extract_inline_tags(body_content)
@@ -59,7 +129,16 @@ class VaultScanner:
                 modified_at=mtime,
                 created_at=ctime,
                 content_hash=content_hash,
-                tags=all_tags
+                tags=all_tags,
+                bucket=bucket,
+                status=status,
+                attention=attention,
+                daily_note=daily_note,
+                author=author,
+                url=url,
+                extra_metadata=extra_metadata,
+                is_ambiguous=is_ambiguous,
+                detected_body_url=detected_url
             )
 
         except Exception as e:

@@ -22,6 +22,7 @@ from table_widget import TagTableWidget
 from note_editor import NoteEditorPanel
 from settings_dialog import SettingsDialog
 from temporal_widget import TemporalViewWidget
+from yaml_manager_widget import YamlManagerWidget
 
 class TagStatsDialog(QDialog):
     def __init__(self, stats, parent=None):
@@ -190,6 +191,11 @@ class MainWindow(QMainWindow):
         self.temporal_widget.note_saved.connect(self._on_temporal_note_saved)
         self.tab_widget.addTab(self.temporal_widget, "📅 Temporal Explorer")
 
+        # --- TAB 3: Bulk YAML Manager ---
+        self.yaml_manager_widget = YamlManagerWidget(self.cache_manager, vault_path=vault_p)
+        self.yaml_manager_widget.yaml_updated.connect(self._on_yaml_updated_refresh_all)
+        self.tab_widget.addTab(self.yaml_manager_widget, "⚙️ Bulk YAML Manager")
+
         main_layout.addWidget(self.tab_widget, stretch=1)
 
         # 3. Status Bar
@@ -305,6 +311,7 @@ class MainWindow(QMainWindow):
     def _on_vault_changed_from_settings(self, new_vault_path: str):
         if new_vault_path and Path(new_vault_path).exists():
             self.temporal_widget.set_vault_path(new_vault_path)
+            self.yaml_manager_widget.set_vault_path(new_vault_path)
             self.start_vault_scan(new_vault_path)
             self.start_file_watcher(new_vault_path)
 
@@ -333,6 +340,8 @@ class MainWindow(QMainWindow):
         self.table_widget.reload_tags(filter_query=self.search_bar.text(), sort_by=sort_order)
         self.temporal_widget.set_vault_path(self.config_manager.get("vault_path", ""))
         self.temporal_widget.load_data()
+        self.yaml_manager_widget.set_vault_path(self.config_manager.get("vault_path", ""))
+        self.yaml_manager_widget.load_data()
         
         stats = self.cache_manager.get_tag_stats()
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -376,6 +385,7 @@ class MainWindow(QMainWindow):
         sort_order = self.config_manager.get("sort_order", "count_desc")
         self.table_widget.reload_tags(filter_query=self.search_bar.text(), sort_by=sort_order)
         self.temporal_widget.load_data()
+        self.yaml_manager_widget.load_data()
 
         stats = self.cache_manager.get_tag_stats()
         self.lbl_status_info.setText(f"Vault updated incrementally | {stats.total_tags} tags | {stats.total_notes} notes")
@@ -383,7 +393,14 @@ class MainWindow(QMainWindow):
     def _on_temporal_note_saved(self, rel_path: str):
         sort_order = self.config_manager.get("sort_order", "count_desc")
         self.table_widget.reload_tags(filter_query=self.search_bar.text(), sort_by=sort_order)
+        self.yaml_manager_widget.load_data()
         self.lbl_status_info.setText(f"Note saved: {rel_path}")
+
+    def _on_yaml_updated_refresh_all(self):
+        sort_order = self.config_manager.get("sort_order", "count_desc")
+        self.table_widget.reload_tags(filter_query=self.search_bar.text(), sort_by=sort_order)
+        self.temporal_widget.load_data()
+        self.lbl_status_info.setText("YAML metadata updated successfully across selected notes")
 
     def _on_search_changed(self, query: str):
         sort_order = self.config_manager.get("sort_order", "count_desc")

@@ -11,6 +11,15 @@ class Note:
     created_at: float = 0.0
     content_hash: str = ""
     tags: Set[str] = field(default_factory=set)
+    bucket: str = "note"
+    status: str = "hot"
+    attention: str = "settled"
+    daily_note: bool = False
+    author: str = ""
+    url: str = ""
+    extra_metadata: Dict = field(default_factory=dict)
+    is_ambiguous: bool = False
+    detected_body_url: str = ""
 
     @property
     def modified_date_str(self) -> str:
