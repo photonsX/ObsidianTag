@@ -621,6 +621,7 @@ class NoteEditorPanel(QWidget):
 
             new_content = frontmatter.dumps(post)
             self.editor.setPlainText(new_content)
+            self._on_save()
 
             QMessageBox.information(
                 self, "Read Tags Success",
@@ -666,6 +667,7 @@ class NoteEditorPanel(QWidget):
 
             new_content = frontmatter.dumps(post)
             self.editor.setPlainText(new_content)
+            self._on_save()
 
             QMessageBox.information(self, "Read URL Success", f"Updated YAML url property to:\n{target_url}")
         except Exception as e:
@@ -716,6 +718,7 @@ class NoteEditorPanel(QWidget):
 
             new_content = frontmatter.dumps(post)
             self.editor.setPlainText(new_content)
+            self._on_save()
 
             QMessageBox.information(self, "Read Author Success", f"Updated YAML author property to:\n{target_author}")
         except Exception as e:
@@ -790,6 +793,7 @@ class NoteEditorPanel(QWidget):
 
             self.editor.setPlainText(new_content)
             self.preview_browser.setMarkdown(new_content)
+            self._on_save()
 
             QMessageBox.information(
                 self, "Fix YAML Tags Success",
