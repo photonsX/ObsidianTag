@@ -95,7 +95,6 @@ class TemporalViewWidget(QWidget):
 
     def set_vault_path(self, path: str):
         self.vault_path = path
-        self.editor_panel.set_vault_path(path)
         self.load_data()
 
     def setup_ui(self):
