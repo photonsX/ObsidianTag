@@ -95,11 +95,12 @@ class YamlManagerWidget(QWidget):
 
         left_layout.addWidget(header_frame)
 
-        # Table Widget (# and Note Title columns only)
+        # Table Widget (#, Note Title, YAML Tag Status)
         self.table_widget = QTableWidget()
-        self.table_widget.setColumnCount(2)
-        self.table_widget.setHorizontalHeaderLabels(["#", "Note Title"])
+        self.table_widget.setColumnCount(3)
+        self.table_widget.setHorizontalHeaderLabels(["#", "Note Title", "YAML Tag Status"])
         self.table_widget.setColumnWidth(0, 45)
+        self.table_widget.setColumnWidth(2, 130)
         self.table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
 
         self.table_widget.setShowGrid(True)
@@ -133,6 +134,7 @@ class YamlManagerWidget(QWidget):
             }
         """)
         self.table_widget.itemSelectionChanged.connect(self._on_table_selection_changed)
+        self.table_widget.cellClicked.connect(self._on_cell_clicked)
 
         # Enable Context Menu on Note List Table
         self.table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -151,6 +153,47 @@ class YamlManagerWidget(QWidget):
         # 45/55 split ratio
         splitter.setSizes([450, 550])
         main_layout.addWidget(splitter, stretch=1)
+
+    def _detect_note_tag_status(self, rel_path: str) -> str:
+        if not self.vault_path:
+            return "NO_YAML"
+        abs_p = Path(self.vault_path) / rel_path
+        if not abs_p.exists():
+            return "NO_YAML"
+        try:
+            with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
+                raw_content = f.read()
+
+            post = frontmatter.loads(raw_content)
+            meta = dict(post.metadata)
+
+            raw_tags = meta.get("tags") if "tags" in meta else meta.get("tag")
+
+            if raw_tags is None or raw_tags == [] or raw_tags == "":
+                return "NO_YAML"
+
+            if "tag" in meta and "tags" not in meta:
+                return "NEEDS_FIX"
+
+            if isinstance(raw_tags, str):
+                return "NEEDS_FIX"
+
+            if isinstance(raw_tags, list):
+                for t in raw_tags:
+                    if not isinstance(t, str):
+                        return "NEEDS_FIX"
+                    if " " in t or t.startswith("#") or "," in t:
+                        return "NEEDS_FIX"
+
+            return "VALID"
+        except Exception:
+            return "NO_YAML"
+
+    def _on_cell_clicked(self, row: int, col: int):
+        if col == 2 and 0 <= row < len(self.notes_data):
+            item = self.table_widget.item(row, 2)
+            if item and "Fix" in item.text():
+                self._batch_fix_yaml_tags([row])
 
     def load_data(self):
         v_scroll = self.table_widget.verticalScrollBar().value()
@@ -187,10 +230,29 @@ class YamlManagerWidget(QWidget):
                 item_title.setForeground(QColor("#e67e22"))
             self.table_widget.setItem(row_idx, 1, item_title)
 
+            # 2. YAML Tag Status
+            status_code = self._detect_note_tag_status(n["path"])
+            if status_code == "NEEDS_FIX":
+                item_status = QTableWidgetItem("🛠️ Fix")
+                item_status.setForeground(QColor("#e67e22"))
+                item_status.setToolTip("Click to fix YAML tags into kebab-case list format")
+            elif status_code == "NO_YAML":
+                item_status = QTableWidgetItem("🚫 No YAML")
+                item_status.setForeground(QColor("#777777"))
+                item_status.setToolTip("No tags found in YAML frontmatter")
+            else:
+                item_status = QTableWidgetItem("✅ Valid")
+                item_status.setForeground(QColor("#2ecc71"))
+                item_status.setToolTip("YAML tags are clean and valid")
+
+            item_status.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table_widget.setItem(row_idx, 2, item_status)
+
             # Re-select row if path matched
             if n["path"] in saved_paths:
                 item_title.setSelected(True)
                 item_num.setSelected(True)
+                item_status.setSelected(True)
 
         self.ignore_cell_signals = False
         self.table_widget.verticalScrollBar().setValue(v_scroll)
