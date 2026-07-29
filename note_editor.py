@@ -291,33 +291,6 @@ class NoteEditorPanel(QWidget):
         toolbar.setContentsMargins(0, 0, 0, 0)
         toolbar.setSpacing(6)
 
-        self.lbl_title_prefix = QLabel("📄")
-        self.lbl_title_prefix.setStyleSheet("font-size: 13px;")
-
-        self.txt_title = QLineEdit()
-        self.txt_title.setPlaceholderText("Editing Note: None")
-        self.txt_title.setStyleSheet("""
-            QLineEdit {
-                background-color: transparent;
-                color: #007acc;
-                font-weight: bold;
-                font-size: 13px;
-                border: 1px solid transparent;
-                border-radius: 3px;
-                padding: 2px 4px;
-            }
-            QLineEdit:hover, QLineEdit:focus {
-                background-color: #252526;
-                border: 1px solid #007acc;
-            }
-            QLineEdit:disabled {
-                color: #555555;
-                background-color: transparent;
-                border: none;
-            }
-        """)
-        self.txt_title.returnPressed.connect(self._on_title_edited)
-
         # Mode Toggle Buttons (Source vs Markdown Preview)
         self.btn_mode_source = QPushButton("📝 Source")
         self.btn_mode_source.setCheckable(True)
@@ -462,8 +435,6 @@ class NoteEditorPanel(QWidget):
         self.btn_cancel.clicked.connect(self._on_cancel)
 
         # Assemble Toolbar
-        toolbar.addWidget(self.lbl_title_prefix)
-        toolbar.addWidget(self.txt_title, stretch=1)
         toolbar.addWidget(self.btn_mode_source)
         toolbar.addWidget(self.btn_mode_preview)
         toolbar.addWidget(self.combo_font_size)
@@ -471,7 +442,7 @@ class NoteEditorPanel(QWidget):
         toolbar.addWidget(self.chk_autosave)
         toolbar.addWidget(self.lbl_autosave_status)
         toolbar.addWidget(self.btn_cancel_autosave)
-        toolbar.addSpacing(10)
+        toolbar.addStretch(1)
         toolbar.addWidget(self.btn_read_from)
         toolbar.addWidget(self.btn_save)
         toolbar.addWidget(self.btn_cancel)
@@ -503,7 +474,6 @@ class NoteEditorPanel(QWidget):
         self._set_controls_enabled(False)
 
     def _set_controls_enabled(self, enabled: bool):
-        self.txt_title.setEnabled(enabled)
         self.chk_autosave.setEnabled(enabled)
         self.combo_font_size.setEnabled(enabled)
         self.btn_mode_source.setEnabled(enabled)
@@ -518,8 +488,6 @@ class NoteEditorPanel(QWidget):
 
     def clear_and_disable(self, message: str):
         self.current_rel_path = ""
-        self.txt_title.setText(message)
-        self.txt_title.setToolTip("")
         self.ignore_text_changes = True
         self.editor.setPlainText("")
         self.preview_browser.setMarkdown("")
@@ -528,25 +496,16 @@ class NoteEditorPanel(QWidget):
         self.lbl_autosave_status.setText("Inactive")
         self.lbl_autosave_status.setStyleSheet("color: #777777; font-size: 11px;")
 
-    def _on_title_edited(self):
-        if not self.current_rel_path:
-            return
-        new_title = self.txt_title.text().strip()
-        if new_title:
-            self.title_renamed.emit(self.current_rel_path, new_title)
-
     def _on_font_size_changed(self, text: str):
         try:
             pt_size = int(text.replace("pt", "").strip())
             self.current_font_size = pt_size
 
-            # Scale Source Editor font
             font_ed = self.editor.font()
             font_ed.setPointSize(pt_size)
             self.editor.setFont(font_ed)
             self.editor.update_line_number_area_width(0)
 
-            # Scale Preview Browser font
             self._apply_preview_font_size(pt_size)
         except Exception:
             pass
@@ -578,7 +537,6 @@ class NoteEditorPanel(QWidget):
     def load_note(self, rel_path: str, content: str, available_tags: list = None):
         self.ignore_text_changes = True
         self.current_rel_path = rel_path
-        self.lbl_title.setText(f"📄 Editing Note: {rel_path}")
 
         if available_tags:
             self.editor.set_tags_list(available_tags)
