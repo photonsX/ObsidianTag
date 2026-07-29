@@ -446,38 +446,61 @@ class YamlManagerWidget(QWidget):
                     with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
                         raw_content = f.read()
 
-                    post = frontmatter.loads(raw_content)
-                    meta = dict(post.metadata)
-
-                    raw_tags = meta.get("tags") or meta.get("tag")
                     parsed_tags = []
+                    post = None
 
-                    if isinstance(raw_tags, str):
-                        items = re.split(r"[,;\s]+", raw_tags)
-                        for it in items:
-                            clean = it.strip(" []#\"'")
-                            if clean:
-                                kebab = re.sub(r'\s+', '-', clean)
-                                if kebab and kebab not in parsed_tags:
-                                    parsed_tags.append(kebab)
-                    elif isinstance(raw_tags, list):
-                        for item in raw_tags:
-                            if isinstance(item, str):
-                                sub_items = re.split(r"[,;\n]+", item)
-                                for sub in sub_items:
-                                    clean = sub.strip(" []#\"'")
-                                    if clean:
-                                        kebab = re.sub(r'\s+', '-', clean)
-                                        if kebab and kebab not in parsed_tags:
-                                            parsed_tags.append(kebab)
+                    try:
+                        post = frontmatter.loads(raw_content)
+                        meta = dict(post.metadata)
+                        raw_tags = meta.get("tags") or meta.get("tag")
+
+                        if isinstance(raw_tags, str):
+                            items = re.split(r"[,;\s]+", raw_tags)
+                            for it in items:
+                                clean = it.strip(" []#\"'")
+                                if clean:
+                                    kebab = re.sub(r'\s+', '-', clean)
+                                    if kebab and kebab not in parsed_tags:
+                                        parsed_tags.append(kebab)
+                        elif isinstance(raw_tags, list):
+                            for item in raw_tags:
+                                if isinstance(item, str):
+                                    sub_items = re.split(r"[,;\n]+", item)
+                                    for sub in sub_items:
+                                        clean = sub.strip(" []#\"'")
+                                        if clean:
+                                            kebab = re.sub(r'\s+', '-', clean)
+                                            if kebab and kebab not in parsed_tags:
+                                                parsed_tags.append(kebab)
+                    except Exception:
+                        pass
+
+                    if not parsed_tags:
+                        match = re.search(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', raw_content, re.DOTALL | re.IGNORECASE)
+                        if match:
+                            tags_text = match.group(1)
+                            tokens = re.findall(r'[a-zA-Z0-9_\-\u00C0-\u024F]+', tags_text)
+                            for tok in tokens:
+                                clean = tok.strip(" -#[],\"'")
+                                if clean:
+                                    kebab = re.sub(r'\s+', '-', clean)
+                                    if kebab and kebab not in parsed_tags:
+                                        parsed_tags.append(kebab)
 
                     if parsed_tags:
-                        meta["tags"] = parsed_tags
-                        if "tag" in meta:
-                            del meta["tag"]
-                        post.metadata = meta
+                        if not post:
+                            tag_block = "tags:\n" + "\n".join([f"  - {t}" for t in parsed_tags])
+                            new_text = re.sub(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', f"\n{tag_block}\n", raw_content, count=1, flags=re.DOTALL | re.IGNORECASE)
+                            if not new_text.startswith("---"):
+                                new_text = f"---\n{new_text.lstrip()}"
+                        else:
+                            meta = dict(post.metadata)
+                            meta["tags"] = parsed_tags
+                            if "tag" in meta:
+                                del meta["tag"]
+                            post.metadata = meta
+                            new_text = frontmatter.dumps(post)
 
-                        new_text = frontmatter.dumps(post)
                         with open(abs_p, "w", encoding="utf-8") as f:
                             f.write(new_text)
 

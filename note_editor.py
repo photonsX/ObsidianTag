@@ -726,12 +726,14 @@ class NoteEditorPanel(QWidget):
         if not content.strip():
             return
 
+        parsed_tags = []
+        post = None
+
+        # 1. Try standard PyYAML parsing first
         try:
             post = frontmatter.loads(content)
             meta = dict(post.metadata)
-
             raw_tags = meta.get("tags") or meta.get("tag")
-            parsed_tags = []
 
             if isinstance(raw_tags, str):
                 items = re.split(r"[,;\s]+", raw_tags)
@@ -751,23 +753,47 @@ class NoteEditorPanel(QWidget):
                                 kebab = re.sub(r'\s+', '-', clean)
                                 if kebab and kebab not in parsed_tags:
                                     parsed_tags.append(kebab)
+        except Exception:
+            pass
 
-            if not parsed_tags:
-                QMessageBox.information(self, "Fix YAML Tags", "No tags found in YAML metadata to format.")
-                return
+        # 2. Fallback regex extractor for malformed YAML syntax (e.g. tags: - ai, aip)
+        if not parsed_tags:
+            match = re.search(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', content, re.DOTALL | re.IGNORECASE)
+            if match:
+                tags_text = match.group(1)
+                tokens = re.findall(r'[a-zA-Z0-9_\-\u00C0-\u024F]+', tags_text)
+                for tok in tokens:
+                    clean = tok.strip(" -#[],\"'")
+                    if clean:
+                        kebab = re.sub(r'\s+', '-', clean)
+                        if kebab and kebab not in parsed_tags:
+                            parsed_tags.append(kebab)
 
-            meta["tags"] = parsed_tags
-            if "tag" in meta:
-                del meta["tag"]
-            post.metadata = meta
+        if not parsed_tags:
+            QMessageBox.information(self, "Fix YAML Tags", "No tags found in YAML metadata to format.")
+            return
 
-            new_content = frontmatter.dumps(post)
+        # 3. Rebuild clean frontmatter
+        try:
+            if not post:
+                tag_block = "tags:\n" + "\n".join([f"  - {t}" for t in parsed_tags])
+                new_content = re.sub(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', f"\n{tag_block}\n", content, count=1, flags=re.DOTALL | re.IGNORECASE)
+                if not new_content.startswith("---"):
+                    new_content = f"---\n{new_content.lstrip()}"
+            else:
+                meta = dict(post.metadata)
+                meta["tags"] = parsed_tags
+                if "tag" in meta:
+                    del meta["tag"]
+                post.metadata = meta
+                new_content = frontmatter.dumps(post)
+
             self.editor.setPlainText(new_content)
             self.preview_browser.setMarkdown(new_content)
 
             QMessageBox.information(
                 self, "Fix YAML Tags Success",
-                f"Successfully formatted {len(parsed_tags)} tag(s) into clean kebab-case nested list format:\n\n" +
+                f"Successfully formatted {len(parsed_tags)} tag(s) into clean kebab-case list format:\n\n" +
                 "\n".join([f"  - {t}" for t in parsed_tags])
             )
         except Exception as e:
