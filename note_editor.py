@@ -306,6 +306,9 @@ class NoteEditorPanel(QWidget):
         act_url = read_menu.addAction("🌐 Read URL (Extract Body URLs to YAML)")
         act_url.triggered.connect(self._read_url_from_body)
 
+        act_author = read_menu.addAction("✍️ Read Author (Extract Body Author to YAML)")
+        act_author.triggered.connect(self._read_author_from_body)
+
         self.btn_read_from.setMenu(read_menu)
 
         self.btn_save = QPushButton("💾 Save (Ctrl+S)")
@@ -448,6 +451,56 @@ class NoteEditorPanel(QWidget):
             QMessageBox.information(self, "Read URL Success", f"Updated YAML url property to:\n{target_url}")
         except Exception as e:
             QMessageBox.critical(self, "Read URL Error", f"Failed to update YAML url property: {e}")
+
+    def _read_author_from_body(self):
+        content = self.editor.toPlainText()
+        if not content.strip():
+            return
+
+        patterns = [
+            r'\*\*(?:Author|By|Written by):\*\*\s*([^\n\r]+)',
+            r'(?:^|\n)(?:Author|By|Written by):\s*([^\n\r]+)',
+        ]
+
+        found_authors = []
+        for pat in patterns:
+            matches = re.findall(pat, content, flags=re.IGNORECASE)
+            for m in matches:
+                clean = m.strip(" *_`#")
+                if clean and clean not in found_authors:
+                    found_authors.append(clean)
+
+        if not found_authors:
+            QMessageBox.information(self, "Read Author", "No author pattern (e.g. **Author:** Name) found in note body text.")
+            return
+
+        target_author = ""
+        if len(found_authors) == 1:
+            target_author = found_authors[0]
+        else:
+            dlg = UrlSelectionDialog(found_authors, parent=self)
+            dlg.setWindowTitle("✍️ Select Author for YAML Property")
+            dlg.findChild(QLabel).setText("<b>Multiple author patterns detected. Select which author to set in YAML:</b>")
+            if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_url:
+                target_author = dlg.selected_url
+            else:
+                return
+
+        if not target_author:
+            return
+
+        try:
+            post = frontmatter.loads(content)
+            meta = dict(post.metadata)
+            meta["author"] = target_author
+            post.metadata = meta
+
+            new_content = frontmatter.dumps(post)
+            self.editor.setPlainText(new_content)
+
+            QMessageBox.information(self, "Read Author Success", f"Updated YAML author property to:\n{target_author}")
+        except Exception as e:
+            QMessageBox.critical(self, "Read Author Error", f"Failed to update YAML author property: {e}")
 
     def _on_save(self):
         if not self.current_rel_path:
