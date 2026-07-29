@@ -1,5 +1,7 @@
 import re
 import frontmatter
+from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 from PyQt6.QtWidgets import (
@@ -389,6 +391,9 @@ class NoteEditorPanel(QWidget):
         act_author = read_menu.addAction("✍️ Read Author (Extract Body Author to YAML)")
         act_author.triggered.connect(self._read_author_from_body)
 
+        act_date = read_menu.addAction("📅 Capture Created Date (Set created: in YAML)")
+        act_date.triggered.connect(self._read_created_date_from_file)
+
         read_menu.addSeparator()
         act_fix_tags = read_menu.addAction("🛠️ Fix YAML Tags (Kebab-case List Format)")
         act_fix_tags.triggered.connect(self._fix_yaml_tags_in_note)
@@ -723,6 +728,46 @@ class NoteEditorPanel(QWidget):
             QMessageBox.information(self, "Read Author Success", f"Updated YAML author property to:\n{target_author}")
         except Exception as e:
             QMessageBox.critical(self, "Read Author Error", f"Failed to update YAML author property: {e}")
+
+    def _read_created_date_from_file(self):
+        content = self.editor.toPlainText()
+        if not content.strip() or not self.current_rel_path:
+            return
+
+        vault_p = getattr(self.parent(), 'vault_path', '')
+        if not vault_p and hasattr(self.parent(), 'parent'):
+            vault_p = getattr(self.parent().parent(), 'vault_path', '')
+
+        if not vault_p:
+            return
+
+        abs_p = Path(vault_p) / self.current_rel_path
+        if not abs_p.exists():
+            return
+
+        try:
+            stat_info = abs_p.stat()
+            ctime = getattr(stat_info, 'st_ctime', stat_info.st_mtime)
+            dt = datetime.fromtimestamp(ctime)
+            created_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+            post = frontmatter.loads(content)
+            meta = dict(post.metadata)
+
+            meta["created"] = created_str
+            post.metadata = meta
+
+            new_content = frontmatter.dumps(post)
+            self.editor.setPlainText(new_content)
+            self.preview_browser.setMarkdown(new_content)
+            self._on_save()
+
+            QMessageBox.information(
+                self, "Capture Created Date Success",
+                f"Successfully captured file creation date into YAML frontmatter:\ncreated: {created_str}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Capture Created Date Error", f"Failed to capture created date: {e}")
 
     def _fix_yaml_tags_in_note(self):
         content = self.editor.toPlainText()
