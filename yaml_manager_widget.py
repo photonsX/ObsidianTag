@@ -275,7 +275,49 @@ class YamlManagerWidget(QWidget):
             act = att_menu.addAction(label)
             act.triggered.connect(lambda _, val=val, rows=selected_rows: self._batch_apply_yaml_key("attention", val, rows))
 
+        menu.addSeparator()
+
+        # 4. Add URL Property Action
+        act_url = menu.addAction("🔗 Add URL Property")
+        act_url.triggered.connect(lambda _, rows=selected_rows: self._batch_add_url_property(rows))
+
         menu.exec(self.table_widget.viewport().mapToGlobal(pos))
+
+    def _batch_add_url_property(self, rows: List[int]):
+        for r in rows:
+            if 0 <= r < len(self.notes_data):
+                n = self.notes_data[r]
+                rel_p = n["path"]
+                abs_p = Path(self.vault_path) / rel_p
+
+                if not abs_p.exists():
+                    continue
+
+                try:
+                    with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
+                        raw_content = f.read()
+
+                    post = frontmatter.loads(raw_content)
+                    meta = dict(post.metadata)
+
+                    # Set url property: use detected_body_url if present, else default "url here"
+                    detected = n.get("detected_body_url", "").strip()
+                    meta["url"] = detected if detected else "url here"
+
+                    post.metadata = meta
+                    new_text = frontmatter.dumps(post)
+
+                    with open(abs_p, "w", encoding="utf-8") as f:
+                        f.write(new_text)
+
+                    updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
+                    if updated_note:
+                        self.cache_manager.incremental_update_file(updated_note)
+                except Exception as e:
+                    print(f"Error adding URL property to {rel_p}: {e}")
+
+        self.yaml_updated.emit()
+        self.load_data()
 
     def _batch_apply_yaml_key(self, key: str, value: str, rows: List[int]):
         for r in rows:
