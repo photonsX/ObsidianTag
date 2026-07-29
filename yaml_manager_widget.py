@@ -2,13 +2,13 @@ import os
 import re
 import json
 import frontmatter
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QLineEdit, QLabel, QFrame, QHeaderView, QSplitter, QStackedWidget, QMenu
+    QLineEdit, QLabel, QFrame, QHeaderView, QSplitter, QStackedWidget, QMenu, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -93,6 +93,41 @@ class YamlManagerWidget(QWidget):
         self.search_input.textChanged.connect(self.load_data)
         self.search_input.returnPressed.connect(self._focus_table)
         filter_row.addWidget(self.search_input, stretch=1)
+
+        self.combo_date_filter = QComboBox()
+        self.combo_date_filter.addItems([
+            "📅 All Notes",
+            "📅 Today",
+            "📅 This Week",
+            "📅 Last Week",
+            "📅 This Month",
+            "📅 Last Month",
+            "📅 3 Months",
+            "📅 6 Months",
+            "📅 Last Year"
+        ])
+        self.combo_date_filter.setStyleSheet("""
+            QComboBox {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+            QComboBox:hover {
+                border-color: #007acc;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #252526;
+                color: #d4d4d4;
+                selection-background-color: #04395e;
+                border: 1px solid #333333;
+            }
+        """)
+        self.combo_date_filter.setToolTip("Filter notes by creation / modification date range")
+        self.combo_date_filter.currentIndexChanged.connect(self.load_data)
+        filter_row.addWidget(self.combo_date_filter)
 
         left_layout.addWidget(header_frame)
 
@@ -204,6 +239,67 @@ class YamlManagerWidget(QWidget):
             if item and "Fix" in item.text():
                 self._batch_fix_yaml_tags([row])
 
+    def _matches_date_filter(self, note_info: dict) -> bool:
+        if not hasattr(self, 'combo_date_filter'):
+            return True
+
+        idx = self.combo_date_filter.currentIndex()
+        if idx <= 0:  # 0: All Notes
+            return True
+
+        if not self.vault_path:
+            return True
+
+        abs_p = Path(self.vault_path) / note_info["path"]
+        if not abs_p.exists():
+            return False
+
+        try:
+            stat_info = abs_p.stat()
+            file_time = max(stat_info.st_mtime, getattr(stat_info, 'st_ctime', 0))
+            note_date = datetime.fromtimestamp(file_time)
+            now = datetime.now()
+            today = now.date()
+
+            if idx == 1:  # Today
+                return note_date.date() == today
+
+            elif idx == 2:  # This Week
+                start_of_week = today - timedelta(days=today.weekday())
+                return note_date.date() >= start_of_week
+
+            elif idx == 3:  # Last Week
+                start_of_this_week = today - timedelta(days=today.weekday())
+                start_of_last_week = start_of_this_week - timedelta(days=7)
+                end_of_last_week = start_of_this_week - timedelta(days=1)
+                return start_of_last_week <= note_date.date() <= end_of_last_week
+
+            elif idx == 4:  # This Month
+                return note_date.year == now.year and note_date.month == now.month
+
+            elif idx == 5:  # Last Month
+                first_of_this_month = today.replace(day=1)
+                last_month_end = first_of_this_month - timedelta(days=1)
+                last_month_start = last_month_end.replace(day=1)
+                return last_month_start <= note_date.date() <= last_month_end
+
+            elif idx == 6:  # 3 Months
+                cutoff = now - timedelta(days=90)
+                return note_date >= cutoff
+
+            elif idx == 7:  # 6 Months
+                cutoff = now - timedelta(days=180)
+                return note_date >= cutoff
+
+            elif idx == 8:  # Last Year
+                cutoff = now - timedelta(days=365)
+                return note_date >= cutoff
+
+        except Exception:
+            return True
+
+        return True
+
     def load_data(self):
         v_scroll = self.table_widget.verticalScrollBar().value()
         selected_rows = self._get_selected_rows()
@@ -215,9 +311,10 @@ class YamlManagerWidget(QWidget):
         self.ignore_cell_signals = True
         query = self.search_input.text().strip()
 
-        self.notes_data = self.cache_manager.get_all_yaml_notes(
+        all_yaml_notes = self.cache_manager.get_all_yaml_notes(
             filter_query=query
         )
+        self.notes_data = [n for n in all_yaml_notes if self._matches_date_filter(n)]
 
         self.table_widget.setRowCount(0)
         self.table_widget.setRowCount(len(self.notes_data))
