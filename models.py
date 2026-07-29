@@ -8,6 +8,7 @@ class Note:
     path: str = ""
     title: str = ""
     modified_at: float = 0.0
+    created_at: float = 0.0
     content_hash: str = ""
     tags: Set[str] = field(default_factory=set)
 
@@ -15,6 +16,12 @@ class Note:
     def modified_date_str(self) -> str:
         if self.modified_at > 0:
             return datetime.fromtimestamp(self.modified_at).strftime("%Y-%m-%d %H:%M:%S")
+        return "N/A"
+
+    @property
+    def created_date_str(self) -> str:
+        if self.created_at > 0:
+            return datetime.fromtimestamp(self.created_at).strftime("%Y-%m-%d %H:%M:%S")
         return "N/A"
 
 @dataclass

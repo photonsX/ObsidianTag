@@ -18,7 +18,9 @@ class VaultScanner:
         """
         try:
             rel_path = str(abs_path.relative_to(vault_root)).replace("\\", "/")
-            mtime = abs_path.stat().st_mtime
+            stat_res = abs_path.stat()
+            mtime = stat_res.st_mtime
+            ctime = getattr(stat_res, "st_birthtime", stat_res.st_ctime)
 
             with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
@@ -55,6 +57,7 @@ class VaultScanner:
                 path=rel_path,
                 title=title,
                 modified_at=mtime,
+                created_at=ctime,
                 content_hash=content_hash,
                 tags=all_tags
             )

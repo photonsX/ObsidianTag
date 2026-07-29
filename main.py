@@ -7,7 +7,7 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QFileDialog, QMessageBox, QProgressBar, QLabel,
-    QStatusBar, QDialog, QFormLayout, QPushButton, QMenu
+    QStatusBar, QDialog, QFormLayout, QPushButton, QMenu, QTabWidget
 )
 from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtGui import QIcon, QAction
@@ -21,6 +21,7 @@ from search_bar import SearchBar
 from table_widget import TagTableWidget
 from note_editor import NoteEditorPanel
 from settings_dialog import SettingsDialog
+from temporal_widget import TemporalViewWidget
 
 class TagStatsDialog(QDialog):
     def __init__(self, stats, parent=None):
@@ -100,10 +101,46 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
 
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(6, 6, 6, 6)
+        main_layout.setSpacing(6)
 
-        # 1. Search & Settings Header Row
+        # Top-level Tabs Container
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #2d2d2d;
+                background-color: #1e1e1e;
+                border-radius: 4px;
+            }
+            QTabBar::tab {
+                background-color: #252526;
+                color: #aaaaaa;
+                padding: 8px 18px;
+                border: 1px solid #2d2d2d;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background-color: #1e1e1e;
+                color: #ffffff;
+                border-bottom-color: #0e639c;
+                border-bottom: 2px solid #007acc;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #2a2d2e;
+                color: #dddddd;
+            }
+        """)
+
+        # --- TAB 1: Tag Manager ---
+        tag_manager_widget = QWidget()
+        tag_layout = QVBoxLayout(tag_manager_widget)
+        tag_layout.setContentsMargins(8, 8, 8, 8)
+        tag_layout.setSpacing(8)
+
         header_row = QHBoxLayout()
         self.search_bar = SearchBar()
         self.search_bar.search_changed.connect(self._on_search_changed)
@@ -128,26 +165,32 @@ class MainWindow(QMainWindow):
         btn_settings.clicked.connect(self.open_settings_dialog)
         header_row.addWidget(btn_settings)
 
-        main_layout.addLayout(header_row)
+        tag_layout.addLayout(header_row)
 
-        # 2. Main Vertical Splitter (Table on top, Editor below)
         self.splitter = QSplitter(Qt.Orientation.Vertical)
-        
-        # Upper Pane: Tag Table Widget
         self.table_widget = TagTableWidget(self.cache_manager)
         self.table_widget.note_double_clicked.connect(self.open_note_editor)
         self.splitter.addWidget(self.table_widget)
 
-        # Lower Pane: Inline Note Editor Panel
         editor_font_sz = self.config_manager.get("editor_font_size", 13)
         self.editor_panel = NoteEditorPanel(font_size=editor_font_sz)
         self.editor_panel.save_requested.connect(self.save_note_changes)
         self.editor_panel.cancel_requested.connect(self.close_note_editor)
-        self.editor_panel.hide()  # Hidden by default until double-clicked
+        self.editor_panel.hide()
         self.splitter.addWidget(self.editor_panel)
 
         self.splitter.setSizes([500, 300])
-        main_layout.addWidget(self.splitter, stretch=1)
+        tag_layout.addWidget(self.splitter, stretch=1)
+
+        self.tab_widget.addTab(tag_manager_widget, "🏷️ Tag Manager")
+
+        # --- TAB 2: Temporal Explorer ---
+        vault_p = self.config_manager.get("vault_path", "")
+        self.temporal_widget = TemporalViewWidget(self.cache_manager, vault_path=vault_p)
+        self.temporal_widget.note_saved.connect(self._on_temporal_note_saved)
+        self.tab_widget.addTab(self.temporal_widget, "📅 Temporal Explorer")
+
+        main_layout.addWidget(self.tab_widget, stretch=1)
 
         # 3. Status Bar
         self.status_bar = QStatusBar()
@@ -261,6 +304,7 @@ class MainWindow(QMainWindow):
 
     def _on_vault_changed_from_settings(self, new_vault_path: str):
         if new_vault_path and Path(new_vault_path).exists():
+            self.temporal_widget.set_vault_path(new_vault_path)
             self.start_vault_scan(new_vault_path)
             self.start_file_watcher(new_vault_path)
 
@@ -287,6 +331,8 @@ class MainWindow(QMainWindow):
         
         sort_order = self.config_manager.get("sort_order", "count_desc")
         self.table_widget.reload_tags(filter_query=self.search_bar.text(), sort_by=sort_order)
+        self.temporal_widget.set_vault_path(self.config_manager.get("vault_path", ""))
+        self.temporal_widget.load_data()
         
         stats = self.cache_manager.get_tag_stats()
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -329,9 +375,15 @@ class MainWindow(QMainWindow):
 
         sort_order = self.config_manager.get("sort_order", "count_desc")
         self.table_widget.reload_tags(filter_query=self.search_bar.text(), sort_by=sort_order)
+        self.temporal_widget.load_data()
 
         stats = self.cache_manager.get_tag_stats()
         self.lbl_status_info.setText(f"Vault updated incrementally | {stats.total_tags} tags | {stats.total_notes} notes")
+
+    def _on_temporal_note_saved(self, rel_path: str):
+        sort_order = self.config_manager.get("sort_order", "count_desc")
+        self.table_widget.reload_tags(filter_query=self.search_bar.text(), sort_by=sort_order)
+        self.lbl_status_info.setText(f"Note saved: {rel_path}")
 
     def _on_search_changed(self, query: str):
         sort_order = self.config_manager.get("sort_order", "count_desc")

@@ -30,9 +30,16 @@ class CacheManager:
                     path TEXT UNIQUE NOT NULL,
                     title TEXT NOT NULL,
                     modified_at REAL NOT NULL,
+                    created_at REAL DEFAULT 0.0,
                     content_hash TEXT NOT NULL
                 )
             """)
+
+            # Migration check: Ensure created_at exists in existing DB
+            cursor.execute("PRAGMA table_info(files)")
+            cols = [row["name"] for row in cursor.fetchall()]
+            if "created_at" not in cols:
+                cursor.execute("ALTER TABLE files ADD COLUMN created_at REAL DEFAULT 0.0")
 
             # Tags table
             cursor.execute("""
@@ -66,6 +73,8 @@ class CacheManager:
 
             # Indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_path ON files(path)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_modified ON files(modified_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_created ON files(created_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_tags_file ON file_tags(file_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag_id)")
@@ -90,8 +99,8 @@ class CacheManager:
 
                 for note in notes_list:
                     cursor.execute(
-                        "INSERT INTO files (path, title, modified_at, content_hash) VALUES (?, ?, ?, ?)",
-                        (note.path, note.title, note.modified_at, note.content_hash)
+                        "INSERT INTO files (path, title, modified_at, created_at, content_hash) VALUES (?, ?, ?, ?, ?)",
+                        (note.path, note.title, note.modified_at, note.created_at, note.content_hash)
                     )
                     file_id = cursor.lastrowid
 
@@ -147,8 +156,8 @@ class CacheManager:
 
                 if not is_delete and note:
                     cursor.execute(
-                        "INSERT INTO files (path, title, modified_at, content_hash) VALUES (?, ?, ?, ?)",
-                        (note.path, note.title, note.modified_at, note.content_hash)
+                        "INSERT INTO files (path, title, modified_at, created_at, content_hash) VALUES (?, ?, ?, ?, ?)",
+                        (note.path, note.title, note.modified_at, note.created_at, note.content_hash)
                     )
                     new_file_id = cursor.lastrowid
 
@@ -349,3 +358,118 @@ class CacheManager:
                 orphan_tags_count=orphan_cnt,
                 avg_tags_per_note=avg_tags
             )
+
+    def get_timeline_notes(self, start_ts: float = None, end_ts: float = None, sort_by: str = "modified_desc", filter_query: str = "") -> List[dict]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            date_col = "f.modified_at" if "modified" in sort_by else "f.created_at"
+            order_dir = "DESC" if "desc" in sort_by else "ASC"
+
+            query = f"""
+                SELECT f.id, f.path, f.title, f.modified_at, f.created_at, f.content_hash
+                FROM files f
+                WHERE 1=1
+            """
+            params = []
+            if start_ts is not None:
+                query += f" AND {date_col} >= ?"
+                params.append(start_ts)
+            if end_ts is not None:
+                query += f" AND {date_col} <= ?"
+                params.append(end_ts)
+            if filter_query:
+                query += " AND (f.title LIKE ? OR f.path LIKE ?)"
+                params.extend([f"%{filter_query}%", f"%{filter_query}%"])
+
+            query += f" ORDER BY {date_col} {order_dir}"
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            notes = []
+            for r in rows:
+                file_id = r["id"]
+                cursor.execute("""
+                    SELECT t.name
+                    FROM tags t
+                    JOIN file_tags ft ON t.id = ft.tag_id
+                    WHERE ft.file_id = ?
+                    ORDER BY t.name ASC
+                """, (file_id,))
+                tags_list = [f"#{row['name']}" for row in cursor.fetchall()]
+
+                notes.append({
+                    "id": file_id,
+                    "path": r["path"],
+                    "title": r["title"],
+                    "modified_at": r["modified_at"],
+                    "created_at": r["created_at"] if r["created_at"] > 0 else r["modified_at"],
+                    "tags": tags_list
+                })
+            return notes
+
+    def get_tag_timeline_stats(self, start_ts: float = None, end_ts: float = None, filter_query: str = "") -> List[dict]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT t.id, t.name, t.count as total_count,
+                       MIN(f.created_at) as first_seen,
+                       MAX(f.modified_at) as last_active,
+                       COUNT(f.id) as range_count
+                FROM tags t
+                JOIN file_tags ft ON t.id = ft.tag_id
+                JOIN files f ON ft.file_id = f.id
+                WHERE 1=1
+            """
+            params = []
+            if start_ts is not None:
+                query += " AND f.modified_at >= ?"
+                params.append(start_ts)
+            if end_ts is not None:
+                query += " AND f.modified_at <= ?"
+                params.append(end_ts)
+            if filter_query:
+                query += " AND (t.name LIKE ? OR f.title LIKE ?)"
+                params.extend([f"%{filter_query}%", f"%{filter_query}%"])
+
+            query += " GROUP BY t.id, t.name ORDER BY last_active DESC"
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            results = []
+            for r in rows:
+                results.append({
+                    "id": r["id"],
+                    "name": r["name"],
+                    "total_count": r["total_count"],
+                    "range_count": r["range_count"],
+                    "first_seen": r["first_seen"] or 0.0,
+                    "last_active": r["last_active"] or 0.0
+                })
+            return results
+
+    def get_daily_activity_counts(self, start_ts: float = None, end_ts: float = None) -> Dict[str, int]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = "SELECT modified_at FROM files WHERE 1=1"
+            params = []
+            if start_ts is not None:
+                query += " AND modified_at >= ?"
+                params.append(start_ts)
+            if end_ts is not None:
+                query += " AND modified_at <= ?"
+                params.append(end_ts)
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            counts = {}
+            from datetime import datetime
+            for r in rows:
+                ts = r["modified_at"]
+                if ts > 0:
+                    day_key = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+                    counts[day_key] = counts.get(day_key, 0) + 1
+            return counts
+
