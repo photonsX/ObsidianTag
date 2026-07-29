@@ -2,6 +2,7 @@ import os
 import re
 import json
 import frontmatter
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -420,17 +421,58 @@ class YamlManagerWidget(QWidget):
         act_url = menu.addAction("🔗 Add URL Property")
         act_url.triggered.connect(lambda _, rows=selected_rows: self._batch_add_url_property(rows))
 
-        # 5. Fix YAML Tags Action
+        # 5. Capture Created Date Action
+        act_date = menu.addAction("📅 Capture Created Date (Set created: in YAML)")
+        act_date.triggered.connect(lambda _, rows=selected_rows: self._batch_capture_created_date(rows))
+
+        # 6. Fix YAML Tags Action
         act_fix = menu.addAction("🛠️ Fix YAML Tags (Kebab-case List Format)")
         act_fix.triggered.connect(lambda _, rows=selected_rows: self._batch_fix_yaml_tags(rows))
 
         menu.addSeparator()
 
-        # 6. View in File Explorer Action
+        # 7. View in File Explorer Action
         act_explorer = menu.addAction("📂 View in File Explorer")
         act_explorer.triggered.connect(lambda _, row=clicked_row: self._open_in_explorer(row))
 
         menu.exec(self.table_widget.viewport().mapToGlobal(pos))
+
+    def _batch_capture_created_date(self, rows: List[int]):
+        for r in rows:
+            if 0 <= r < len(self.notes_data):
+                n = self.notes_data[r]
+                rel_p = n["path"]
+                abs_p = Path(self.vault_path) / rel_p
+
+                if not abs_p.exists():
+                    continue
+
+                try:
+                    stat_info = abs_p.stat()
+                    ctime = getattr(stat_info, 'st_ctime', stat_info.st_mtime)
+                    dt = datetime.fromtimestamp(ctime)
+                    created_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+                    with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
+                        raw_content = f.read()
+
+                    post = frontmatter.loads(raw_content)
+                    meta = dict(post.metadata)
+                    meta["created"] = created_str
+                    post.metadata = meta
+
+                    new_text = frontmatter.dumps(post)
+                    with open(abs_p, "w", encoding="utf-8") as f:
+                        f.write(new_text)
+
+                    updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
+                    if updated_note:
+                        self.cache_manager.incremental_update_file(updated_note)
+                except Exception as e:
+                    print(f"Error capturing created date for {rel_p}: {e}")
+
+        self.yaml_updated.emit()
+        self.load_data()
 
     def _batch_fix_yaml_tags(self, rows: List[int]):
         for r in rows:
