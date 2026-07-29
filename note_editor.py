@@ -851,10 +851,19 @@ class NoteEditorPanel(QWidget):
         if not content.strip():
             return
 
+        def clean_to_kebab(text: str) -> str:
+            text = text.lstrip("#").strip(" []#\"'")
+            if not text:
+                return ""
+            text = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '-', text)
+            kebab = re.sub(r'[\s_]+', '-', text)
+            kebab = re.sub(r'-+', '-', kebab)
+            return kebab.strip("-")
+
         parsed_tags = []
         post = None
 
-        # 1. Try standard PyYAML parsing first
+        # 1. Frontmatter PyYAML parsing
         try:
             post = frontmatter.loads(content)
             meta = dict(post.metadata)
@@ -863,46 +872,56 @@ class NoteEditorPanel(QWidget):
             if isinstance(raw_tags, str):
                 items = re.split(r"[,;\s]+", raw_tags)
                 for it in items:
-                    clean = it.strip(" []#\"'")
-                    if clean:
-                        kebab = re.sub(r'\s+', '-', clean)
-                        if kebab and kebab not in parsed_tags:
-                            parsed_tags.append(kebab)
+                    k = clean_to_kebab(it)
+                    if k and k not in parsed_tags:
+                        parsed_tags.append(k)
             elif isinstance(raw_tags, list):
                 for item in raw_tags:
                     if isinstance(item, str):
                         sub_items = re.split(r"[,;\n]+", item)
                         for sub in sub_items:
-                            clean = sub.strip(" []#\"'")
-                            if clean:
-                                kebab = re.sub(r'\s+', '-', clean)
-                                if kebab and kebab not in parsed_tags:
-                                    parsed_tags.append(kebab)
+                            k = clean_to_kebab(sub)
+                            if k and k not in parsed_tags:
+                                parsed_tags.append(k)
         except Exception:
             pass
 
-        # 2. Fallback regex extractor for malformed YAML syntax (e.g. tags: - ai, aip)
+        # 2. Fallback regex extractor for malformed YAML syntax
         if not parsed_tags:
             match = re.search(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', content, re.DOTALL | re.IGNORECASE)
             if match:
                 tags_text = match.group(1)
                 tokens = re.findall(r'[a-zA-Z0-9_\-\u00C0-\u024F]+', tags_text)
                 for tok in tokens:
-                    clean = tok.strip(" -#[],\"'")
-                    if clean:
-                        kebab = re.sub(r'\s+', '-', clean)
-                        if kebab and kebab not in parsed_tags:
-                            parsed_tags.append(kebab)
+                    k = clean_to_kebab(tok)
+                    if k and k not in parsed_tags:
+                        parsed_tags.append(k)
+
+        # 3. Extract body hashtags & Tags: lines (#ArtificialIntelligence, #AITools, #LearnAI)
+        body_lines = content.splitlines()
+        for line in body_lines:
+            line_str = line.strip()
+            # Skip markdown headers (# Header)
+            if re.match(r'^#{1,6}\s', line_str):
+                continue
+            found_hashtags = re.findall(r'#([A-Za-z0-9_\-\u00C0-\u024F]+)', line_str)
+            for tag_tok in found_hashtags:
+                k = clean_to_kebab(tag_tok)
+                if k and k not in parsed_tags:
+                    parsed_tags.append(k)
 
         if not parsed_tags:
-            QMessageBox.information(self, "Fix YAML Tags", "No tags found in YAML metadata to format.")
+            QMessageBox.information(self, "Fix YAML Tags", "No tags found in YAML metadata or note body text to format.")
             return
 
-        # 3. Rebuild clean frontmatter
+        # 4. Rebuild clean frontmatter
         try:
-            if not post:
+            if not post or not hasattr(post, 'metadata'):
                 tag_block = "tags:\n" + "\n".join([f"  - {t}" for t in parsed_tags])
-                new_content = re.sub(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', f"\n{tag_block}\n", content, count=1, flags=re.DOTALL | re.IGNORECASE)
+                if "tags:" in content or "tag:" in content:
+                    new_content = re.sub(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', f"\n{tag_block}\n", content, count=1, flags=re.DOTALL | re.IGNORECASE)
+                else:
+                    new_content = f"---\n{tag_block}\n---\n\n" + content.lstrip()
                 if not new_content.startswith("---"):
                     new_content = f"---\n{new_content.lstrip()}"
             else:
@@ -914,12 +933,12 @@ class NoteEditorPanel(QWidget):
                 new_content = frontmatter.dumps(post)
 
             self.editor.setPlainText(new_content)
-            self.preview_browser.setMarkdown(new_content)
+            self._render_markdown_preview(new_content)
             self._on_save()
 
             QMessageBox.information(
                 self, "Fix YAML Tags Success",
-                f"Successfully formatted {len(parsed_tags)} tag(s) into clean kebab-case list format:\n\n" +
+                f"Successfully captured and formatted {len(parsed_tags)} tag(s) into clean kebab-case list format:\n\n" +
                 "\n".join([f"  - {t}" for t in parsed_tags])
             )
         except Exception as e:

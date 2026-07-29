@@ -475,6 +475,15 @@ class YamlManagerWidget(QWidget):
         self.load_data()
 
     def _batch_fix_yaml_tags(self, rows: List[int]):
+        def clean_to_kebab(text: str) -> str:
+            text = text.lstrip("#").strip(" []#\"'")
+            if not text:
+                return ""
+            text = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '-', text)
+            kebab = re.sub(r'[\s_]+', '-', text)
+            kebab = re.sub(r'-+', '-', kebab)
+            return kebab.strip("-")
+
         for r in rows:
             if 0 <= r < len(self.notes_data):
                 n = self.notes_data[r]
@@ -491,6 +500,7 @@ class YamlManagerWidget(QWidget):
                     parsed_tags = []
                     post = None
 
+                    # 1. Frontmatter PyYAML parsing
                     try:
                         post = frontmatter.loads(raw_content)
                         meta = dict(post.metadata)
@@ -499,40 +509,50 @@ class YamlManagerWidget(QWidget):
                         if isinstance(raw_tags, str):
                             items = re.split(r"[,;\s]+", raw_tags)
                             for it in items:
-                                clean = it.strip(" []#\"'")
-                                if clean:
-                                    kebab = re.sub(r'\s+', '-', clean)
-                                    if kebab and kebab not in parsed_tags:
-                                        parsed_tags.append(kebab)
+                                k = clean_to_kebab(it)
+                                if k and k not in parsed_tags:
+                                    parsed_tags.append(k)
                         elif isinstance(raw_tags, list):
                             for item in raw_tags:
                                 if isinstance(item, str):
                                     sub_items = re.split(r"[,;\n]+", item)
                                     for sub in sub_items:
-                                        clean = sub.strip(" []#\"'")
-                                        if clean:
-                                            kebab = re.sub(r'\s+', '-', clean)
-                                            if kebab and kebab not in parsed_tags:
-                                                parsed_tags.append(kebab)
+                                        k = clean_to_kebab(sub)
+                                        if k and k not in parsed_tags:
+                                            parsed_tags.append(k)
                     except Exception:
                         pass
 
+                    # 2. Fallback regex for malformed YAML tags
                     if not parsed_tags:
                         match = re.search(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', raw_content, re.DOTALL | re.IGNORECASE)
                         if match:
                             tags_text = match.group(1)
                             tokens = re.findall(r'[a-zA-Z0-9_\-\u00C0-\u024F]+', tags_text)
                             for tok in tokens:
-                                clean = tok.strip(" -#[],\"'")
-                                if clean:
-                                    kebab = re.sub(r'\s+', '-', clean)
-                                    if kebab and kebab not in parsed_tags:
-                                        parsed_tags.append(kebab)
+                                k = clean_to_kebab(tok)
+                                if k and k not in parsed_tags:
+                                    parsed_tags.append(k)
+
+                    # 3. Extract body hashtags & Tags: lines (#ArtificialIntelligence, #AITools, #LearnAI)
+                    body_lines = raw_content.splitlines()
+                    for line in body_lines:
+                        line_str = line.strip()
+                        if re.match(r'^#{1,6}\s', line_str):
+                            continue
+                        found_hashtags = re.findall(r'#([A-Za-z0-9_\-\u00C0-\u024F]+)', line_str)
+                        for tag_tok in found_hashtags:
+                            k = clean_to_kebab(tag_tok)
+                            if k and k not in parsed_tags:
+                                parsed_tags.append(k)
 
                     if parsed_tags:
-                        if not post:
+                        if not post or not hasattr(post, 'metadata'):
                             tag_block = "tags:\n" + "\n".join([f"  - {t}" for t in parsed_tags])
-                            new_text = re.sub(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', f"\n{tag_block}\n", raw_content, count=1, flags=re.DOTALL | re.IGNORECASE)
+                            if "tags:" in raw_content or "tag:" in raw_content:
+                                new_text = re.sub(r'(?:^|\n)(?:tags|tag):\s*(.*?)(?=\n[a-zA-Z0-9_\-]+:|\n---|\Z)', f"\n{tag_block}\n", raw_content, count=1, flags=re.DOTALL | re.IGNORECASE)
+                            else:
+                                new_text = f"---\n{tag_block}\n---\n\n" + raw_content.lstrip()
                             if not new_text.startswith("---"):
                                 new_text = f"---\n{new_text.lstrip()}"
                         else:
