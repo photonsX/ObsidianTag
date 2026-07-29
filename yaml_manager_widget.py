@@ -123,13 +123,6 @@ class YamlResolutionDialog(QDialog):
         h_att.addWidget(self.combo_attention)
         right_layout.addLayout(h_att)
 
-        # URL Input
-        h_url = QHBoxLayout()
-        h_url.addWidget(QLabel("URL:"))
-        self.input_url = QLineEdit()
-        h_url.addWidget(self.input_url)
-        right_layout.addLayout(h_url)
-
         right_layout.addStretch()
 
         splitter.addWidget(right_widget)
@@ -173,8 +166,6 @@ class YamlResolutionDialog(QDialog):
                 att_map = {"settled": 0, "needs-revisit": 1, "pinned": 2}
                 self.combo_attention.setCurrentIndex(att_map.get(note.attention, 0))
 
-                self.input_url.setText(note.url or note.detected_body_url)
-
         except Exception as e:
             QMessageBox.warning(self, "Read Error", f"Could not read note: {e}")
 
@@ -195,9 +186,6 @@ class YamlResolutionDialog(QDialog):
             att_text = self.combo_attention.currentText()
             clean_att = "settled" if "settled" in att_text else ("needs-revisit" if "needs-revisit" in att_text else "pinned")
             meta["attention"] = clean_att
-
-            if self.input_url.text().strip():
-                meta["url"] = self.input_url.text().strip()
 
             post.metadata = meta
             new_content = frontmatter.dumps(post)
@@ -274,7 +262,7 @@ class YamlManagerWidget(QWidget):
         filter_row.addWidget(QLabel("<b>Excel Filter:</b>"))
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Search note title or relative file path...")
+        self.search_input.setPlaceholderText("🔍 Filter note title or relative path...")
         self.search_input.textChanged.connect(self.load_data)
         filter_row.addWidget(self.search_input, stretch=1)
 
@@ -300,21 +288,19 @@ class YamlManagerWidget(QWidget):
 
         main_layout.addWidget(header_frame)
 
-        # Excel Grid Table Widget
+        # Excel Grid Table Widget (Clean: Only #, Note Title, Bucket, Status, Attention)
         self.table_widget = QTableWidget()
-        self.table_widget.setColumnCount(7)
+        self.table_widget.setColumnCount(5)
         self.table_widget.setHorizontalHeaderLabels([
-            "#", "Note Title", "Path", "Bucket ▼", "Status (Heat) ▼", "Attention ▼", "URL / Actions"
+            "#", "Note Title", "Bucket ▼", "Status (Heat) ▼", "Attention ▼"
         ])
-        self.table_widget.setColumnWidth(0, 40)
-        self.table_widget.setColumnWidth(1, 220)
-        self.table_widget.setColumnWidth(2, 220)
-        self.table_widget.setColumnWidth(3, 125)
-        self.table_widget.setColumnWidth(4, 125)
-        self.table_widget.setColumnWidth(5, 135)
-        self.table_widget.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        self.table_widget.setColumnWidth(0, 45)
+        self.table_widget.setColumnWidth(2, 130)
+        self.table_widget.setColumnWidth(3, 130)
+        self.table_widget.setColumnWidth(4, 140)
+        self.table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
 
-        # Spreadsheet styling: Crisp grid lines, alternating rows, compact 26px height
+        # Spreadsheet styling: Crisp grid lines, alternating rows, compact 28px height
         self.table_widget.setShowGrid(True)
         self.table_widget.setAlternatingRowColors(True)
         self.table_widget.verticalHeader().setDefaultSectionSize(28)
@@ -337,7 +323,7 @@ class YamlManagerWidget(QWidget):
                 font-weight: bold;
             }
             QTableWidget::item {
-                padding: 2px 4px;
+                padding: 2px 6px;
                 border: none;
             }
             QTableWidget::item:selected {
@@ -405,74 +391,42 @@ class YamlManagerWidget(QWidget):
             # 1. Note Title
             title_text = f"📄 {n['title']}"
             if n["is_ambiguous"]:
-                title_text = f"⚠️ {n['title']} (Flagged)"
+                title_text = f"⚠️ {n['title']} (Flagged - Double click to fix)"
             item_title = QTableWidgetItem(title_text)
             item_title.setData(Qt.ItemDataRole.UserRole, n["path"])
             if n["is_ambiguous"]:
                 item_title.setForeground(QColor("#e67e22"))
             self.table_widget.setItem(row_idx, 1, item_title)
 
-            # 2. Relative Path
-            item_path = QTableWidgetItem(n["path"])
-            item_path.setForeground(QColor("#888888"))
-            self.table_widget.setItem(row_idx, 2, item_path)
-
             # Apply selection state if path in saved selection
             if n["path"] in self.saved_selected_paths:
                 item_num.setSelected(True)
                 item_title.setSelected(True)
-                item_path.setSelected(True)
 
-            # 3. Bucket Dropdown
+            # 2. Bucket Dropdown
             combo_b = QComboBox()
             combo_b.addItems(["note", "idea", "wip", "task", "dailynote"])
             idx_b = combo_b.findText(n["bucket"])
             if idx_b >= 0:
                 combo_b.setCurrentIndex(idx_b)
             combo_b.currentIndexChanged.connect(lambda _, r=row_idx, c=combo_b: self._on_row_yaml_changed(r, "bucket", c.currentText()))
-            self.table_widget.setCellWidget(row_idx, 3, combo_b)
+            self.table_widget.setCellWidget(row_idx, 2, combo_b)
 
-            # 4. Status (Heat) Dropdown
+            # 3. Status (Heat) Dropdown
             combo_s = QComboBox()
             combo_s.addItems(["🔥 hot", "☀️ warm", "❄️ cool", "🧊 cold"])
             st_map = {"hot": 0, "warm": 1, "cool": 2, "cold": 3}
             combo_s.setCurrentIndex(st_map.get(n["status"], 0))
             combo_s.currentIndexChanged.connect(lambda _, r=row_idx, c=combo_s: self._on_row_status_changed(r, c.currentText()))
-            self.table_widget.setCellWidget(row_idx, 4, combo_s)
+            self.table_widget.setCellWidget(row_idx, 3, combo_s)
 
-            # 5. Attention Dropdown
+            # 4. Attention Dropdown
             combo_a = QComboBox()
             combo_a.addItems(["✅ settled", "⚡ needs-revisit", "📌 pinned"])
             att_map = {"settled": 0, "needs-revisit": 1, "pinned": 2}
             combo_a.setCurrentIndex(att_map.get(n["attention"], 0))
             combo_a.currentIndexChanged.connect(lambda _, r=row_idx, c=combo_a: self._on_row_attention_changed(r, c.currentText()))
-            self.table_widget.setCellWidget(row_idx, 5, combo_a)
-
-            # 6. URL / Actions Cell
-            url_widget = QWidget()
-            url_layout = QHBoxLayout(url_widget)
-            url_layout.setContentsMargins(2, 0, 2, 0)
-            url_layout.setSpacing(4)
-
-            input_url = QLineEdit(n["url"])
-            input_url.setPlaceholderText("URL link...")
-            input_url.editingFinished.connect(lambda r=row_idx, i=input_url: self._on_row_yaml_changed(r, "url", i.text()))
-            url_layout.addWidget(input_url, stretch=1)
-
-            if n["detected_body_url"] and not n["url"]:
-                btn_add_url = QPushButton("➕ Link")
-                btn_add_url.setToolTip(f"Add detected body link: {n['detected_body_url']}")
-                btn_add_url.setStyleSheet("background-color: #2d8a4e; color: #fff; padding: 1px 4px; font-size: 10px;")
-                btn_add_url.clicked.connect(lambda _, r=row_idx, link=n["detected_body_url"]: self._add_detected_url(r, link))
-                url_layout.addWidget(btn_add_url)
-
-            if n["is_ambiguous"]:
-                btn_resolve = QPushButton("🛠️ Fix")
-                btn_resolve.setStyleSheet("background-color: #e67e22; color: #fff; padding: 1px 6px; font-weight: bold; font-size: 10px;")
-                btn_resolve.clicked.connect(lambda _, path=n["path"]: self.open_resolution_dialog(path))
-                url_layout.addWidget(btn_resolve)
-
-            self.table_widget.setCellWidget(row_idx, 6, url_widget)
+            self.table_widget.setCellWidget(row_idx, 4, combo_a)
 
         self.ignore_cell_signals = False
 
@@ -502,28 +456,6 @@ class YamlManagerWidget(QWidget):
             selected_set.add(trigger_row)
 
         return sorted(list(selected_set))
-
-    def _add_detected_url(self, row_idx: int, link: str):
-        n = self.notes_data[row_idx]
-        rel_p = n["path"]
-        abs_p = Path(self.vault_path) / rel_p
-        if abs_p.exists():
-            try:
-                with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
-                    raw_content = f.read()
-                post = frontmatter.loads(raw_content)
-                meta = dict(post.metadata)
-                meta["url"] = link
-                post.metadata = meta
-                with open(abs_p, "w", encoding="utf-8") as f:
-                    f.write(frontmatter.dumps(post))
-                updated_note = VaultScanner.scan_file(abs_p, Path(self.vault_path))
-                if updated_note:
-                    self.cache_manager.incremental_update_file(updated_note)
-                self.load_data()
-                self.yaml_updated.emit()
-            except Exception as e:
-                print(f"Error adding link to {rel_p}: {e}")
 
     def _on_row_status_changed(self, row_idx: int, text: str):
         clean_st = "hot" if "hot" in text else ("warm" if "warm" in text else ("cool" if "cool" in text else "cold"))
