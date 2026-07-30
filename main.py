@@ -92,6 +92,7 @@ class MainWindow(QMainWindow):
         # Check vault path on startup
         vault_p = self.config_manager.get("vault_path")
         if vault_p and Path(vault_p).exists():
+            self.table_widget.set_vault_path(vault_p)
             self.start_vault_scan(vault_p)
             self.start_file_watcher(vault_p)
         else:
@@ -169,8 +170,11 @@ class MainWindow(QMainWindow):
         tag_layout.addLayout(header_row)
 
         self.splitter = QSplitter(Qt.Orientation.Vertical)
-        self.table_widget = TagTableWidget(self.cache_manager)
+        vault_p = self.config_manager.get("vault_path", "")
+        self.table_widget = TagTableWidget(self.cache_manager, vault_path=vault_p)
         self.table_widget.note_double_clicked.connect(self.open_note_editor)
+        self.table_widget.status_message.connect(lambda msg: self.lbl_status_info.setText(msg))
+        self.table_widget.tags_updated.connect(self._on_yaml_updated_refresh_all)
         self.splitter.addWidget(self.table_widget)
 
         editor_font_sz = self.config_manager.get("editor_font_size", 13)
@@ -310,6 +314,7 @@ class MainWindow(QMainWindow):
 
     def _on_vault_changed_from_settings(self, new_vault_path: str):
         if new_vault_path and Path(new_vault_path).exists():
+            self.table_widget.set_vault_path(new_vault_path)
             self.temporal_widget.set_vault_path(new_vault_path)
             self.yaml_manager_widget.set_vault_path(new_vault_path)
             self.start_vault_scan(new_vault_path)
@@ -319,6 +324,7 @@ class MainWindow(QMainWindow):
         self.lbl_status_info.setText("Scanning vault...")
         self.progress_bar.setValue(0)
         self.progress_bar.show()
+        self.table_widget.set_vault_path(vault_path)
 
         self.scan_worker = VaultScanWorker(vault_path)
         self.scan_worker.progress.connect(self._on_scan_progress)
@@ -337,6 +343,8 @@ class MainWindow(QMainWindow):
         self.cache_manager.full_scan_update(notes_list)
         
         sort_order = self.config_manager.get("sort_order", "count_desc")
+        vault_p = self.config_manager.get("vault_path", "")
+        self.table_widget.set_vault_path(vault_p)
         self.table_widget.reload_tags(filter_query=self.search_bar.text(), sort_by=sort_order)
         self.temporal_widget.set_vault_path(self.config_manager.get("vault_path", ""))
         self.temporal_widget.load_data()

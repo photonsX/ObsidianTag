@@ -2,6 +2,7 @@ import os
 import re
 import hashlib
 import frontmatter
+from datetime import datetime
 from pathlib import Path
 from typing import List, Set, Optional, Tuple
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -102,8 +103,28 @@ class VaultScanner:
                 if url_val:
                     url = str(url_val).strip()
 
-                # 8. Extra Metadata (preserves all custom/unknown keys)
-                extra_metadata = meta
+                # 8. Creation Timestamp (YAML header priority, fallback to OS ctime)
+                created_val = meta.pop("created", None) or meta.pop("created_at", None) or meta.pop("date", None)
+                if created_val:
+                    try:
+                        if isinstance(created_val, (int, float)):
+                            ctime = float(created_val)
+                        elif hasattr(created_val, "timestamp"):
+                            ctime = created_val.timestamp()
+                        else:
+                            created_str = str(created_val).strip()
+                            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y/%m/%d"):
+                                try:
+                                    dt = datetime.strptime(created_str[:19], fmt)
+                                    ctime = dt.timestamp()
+                                    break
+                                except ValueError:
+                                    pass
+                    except Exception:
+                        pass
+
+                # 9. Extra Metadata (preserves all custom/unknown keys)
+                extra_metadata = {k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in meta.items()}
 
             except Exception as e:
                 is_ambiguous = True

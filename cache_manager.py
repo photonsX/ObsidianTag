@@ -125,7 +125,7 @@ class CacheManager:
                 file_tag_tuples = []
 
                 for note in notes_list:
-                    extra_json = json.dumps(note.extra_metadata) if note.extra_metadata else "{}"
+                    extra_json = json.dumps(note.extra_metadata, default=str) if note.extra_metadata else "{}"
                     cursor.execute(
                         """INSERT INTO files 
                         (path, title, modified_at, created_at, content_hash, bucket, status, attention, daily_note, author, url, extra_metadata, is_ambiguous, detected_body_url) 
@@ -190,7 +190,7 @@ class CacheManager:
                     cursor.execute("DELETE FROM files WHERE id = ?", (file_id,))
 
                 if not is_delete and note:
-                    extra_json = json.dumps(note.extra_metadata) if note.extra_metadata else "{}"
+                    extra_json = json.dumps(note.extra_metadata, default=str) if note.extra_metadata else "{}"
                     cursor.execute(
                         """INSERT INTO files 
                         (path, title, modified_at, created_at, content_hash, bucket, status, attention, daily_note, author, url, extra_metadata, is_ambiguous, detected_body_url) 
@@ -249,6 +249,27 @@ class CacheManager:
                     conn.commit()
         except Exception as e:
             print(f"Error removing file from cache: {e}")
+
+    def get_tags_for_file_paths(self, file_paths: List[str]) -> List[str]:
+        if not file_paths:
+            return []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ",".join("?" * len(file_paths))
+                norm_paths = [p.replace("\\", "/").lower() for p in file_paths]
+                cursor.execute(f"""
+                    SELECT DISTINCT t.name 
+                    FROM tags t
+                    JOIN file_tags ft ON t.id = ft.tag_id
+                    JOIN files f ON f.id = ft.file_id
+                    WHERE LOWER(f.path) IN ({placeholders})
+                    ORDER BY t.name ASC
+                """, norm_paths)
+                return [row["name"] for row in cursor.fetchall()]
+        except Exception as e:
+            print(f"Error fetching tags for file paths: {e}")
+            return []
 
     def get_all_tags(self, sort_by="count_desc", filter_query="", show_empty=False, show_orphans=True) -> List[dict]:
         with self._get_connection() as conn:
