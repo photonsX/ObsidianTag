@@ -239,6 +239,30 @@ class YamlManagerWidget(QWidget):
             if item and "Fix" in item.text():
                 self._batch_fix_yaml_tags([row])
 
+    def _get_note_created_datetime(self, abs_p: Path) -> Optional[datetime]:
+        try:
+            with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
+                raw_content = f.read()
+
+            post = frontmatter.loads(raw_content)
+            created_val = post.metadata.get("created")
+            if created_val:
+                created_str = str(created_val).strip()
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y/%m/%d"):
+                    try:
+                        return datetime.strptime(created_str[:19], fmt)
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+
+        try:
+            stat_info = abs_p.stat()
+            ctime = getattr(stat_info, 'st_ctime', stat_info.st_mtime)
+            return datetime.fromtimestamp(ctime)
+        except Exception:
+            return None
+
     def _matches_date_filter(self, note_info: dict) -> bool:
         if not hasattr(self, 'combo_date_filter'):
             return True
@@ -254,49 +278,46 @@ class YamlManagerWidget(QWidget):
         if not abs_p.exists():
             return False
 
-        try:
-            stat_info = abs_p.stat()
-            file_time = max(stat_info.st_mtime, getattr(stat_info, 'st_ctime', 0))
-            note_date = datetime.fromtimestamp(file_time)
-            now = datetime.now()
-            today = now.date()
-
-            if idx == 1:  # Today
-                return note_date.date() == today
-
-            elif idx == 2:  # This Week
-                start_of_week = today - timedelta(days=today.weekday())
-                return note_date.date() >= start_of_week
-
-            elif idx == 3:  # Last Week
-                start_of_this_week = today - timedelta(days=today.weekday())
-                start_of_last_week = start_of_this_week - timedelta(days=7)
-                end_of_last_week = start_of_this_week - timedelta(days=1)
-                return start_of_last_week <= note_date.date() <= end_of_last_week
-
-            elif idx == 4:  # This Month
-                return note_date.year == now.year and note_date.month == now.month
-
-            elif idx == 5:  # Last Month
-                first_of_this_month = today.replace(day=1)
-                last_month_end = first_of_this_month - timedelta(days=1)
-                last_month_start = last_month_end.replace(day=1)
-                return last_month_start <= note_date.date() <= last_month_end
-
-            elif idx == 6:  # 3 Months
-                cutoff = now - timedelta(days=90)
-                return note_date >= cutoff
-
-            elif idx == 7:  # 6 Months
-                cutoff = now - timedelta(days=180)
-                return note_date >= cutoff
-
-            elif idx == 8:  # Last Year
-                cutoff = now - timedelta(days=365)
-                return note_date >= cutoff
-
-        except Exception:
+        note_date = self._get_note_created_datetime(abs_p)
+        if not note_date:
             return True
+
+        now = datetime.now()
+        today = now.date()
+
+        if idx == 1:  # Today
+            return note_date.date() == today
+
+        elif idx == 2:  # This Week
+            start_of_week = today - timedelta(days=today.weekday())
+            return note_date.date() >= start_of_week
+
+        elif idx == 3:  # Last Week
+            start_of_this_week = today - timedelta(days=today.weekday())
+            start_of_last_week = start_of_this_week - timedelta(days=7)
+            end_of_last_week = start_of_this_week - timedelta(days=1)
+            return start_of_last_week <= note_date.date() <= end_of_last_week
+
+        elif idx == 4:  # This Month
+            return note_date.year == now.year and note_date.month == now.month
+
+        elif idx == 5:  # Last Month
+            first_of_this_month = today.replace(day=1)
+            last_month_end = first_of_this_month - timedelta(days=1)
+            last_month_start = last_month_end.replace(day=1)
+            return last_month_start <= note_date.date() <= last_month_end
+
+        elif idx == 6:  # 3 Months
+            cutoff = now - timedelta(days=90)
+            return note_date >= cutoff
+
+        elif idx == 7:  # 6 Months
+            cutoff = now - timedelta(days=180)
+            return note_date >= cutoff
+
+        elif idx == 8:  # Last Year
+            cutoff = now - timedelta(days=365)
+            return note_date >= cutoff
 
         return True
 
